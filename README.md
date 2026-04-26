@@ -51,12 +51,19 @@ This whole repo is **~3,000 lines of TypeScript**. Read it. Fork it. Customize t
 |---|---|---|---|
 | 1 | **Sign up to MyAgentMail** | https://myagentmail.com/signup | 7-day free trial; card required, cancel anytime before trial ends |
 | 2 | **Subscribe to the LinkedIn add-on** | Dashboard → Billing | $29/mo (Solo) — required for signals |
-| 3 | **Get an OpenAI API key** | https://platform.openai.com/api-keys | ~$0.01–0.05/day on `gpt-4o-mini` |
+| 3 | **Get an OpenAI API key** *(for local message drafting only)* | https://platform.openai.com/api-keys | ~$0.01–0.05/day on `gpt-4o-mini` |
 | 4 | **Clone + configure this repo** | (commands below) | Free |
 | 5 | **Connect a LinkedIn account** | The starter app at `localhost:3000` | Free |
 | 6 | **Create your first signal** | Same app | Free |
 
-The classification LLM call happens on MyAgentMail's servers (we use OpenRouter + Gemini Flash Lite — covered by your subscription). The OpenAI key here is only for **drafting** the personalized connection note locally.
+**What's bundled vs. what's yours.** Two LLM steps happen in this stack:
+
+| Step | Where it runs | Whose API key |
+|---|---|---|
+| **Classifying** matches (filtering noise, scoring intent) | MyAgentMail server-side via OpenRouter | Bundled — included with your LinkedIn add-on subscription |
+| **Drafting** the personalized connection message | Your local app (`src/lib/agent.ts`) | Your OpenAI key — you control the model and prompt |
+
+This split is intentional. Classification is a routine binary decision — easy to standardize. Drafting reflects *your* voice, *your* product, and *your* prompts — so it stays in your code where you can swap models, tune the system prompt, or replace it entirely with Anthropic, Mistral, a local Llama, or even a hand-curated template. We don't want to dictate your outreach voice.
 
 ### Step 1 — Sign up to MyAgentMail
 
@@ -87,9 +94,11 @@ While you're there, bookmark:
 - **Knowledge base** → https://myagentmail.com/kb (concepts, deliverability guides, recipes)
 - **Blog** → https://myagentmail.com/blog (deeper context)
 
-### Step 4 — Get an OpenAI key
+### Step 4 — Get an OpenAI key *(only for local drafting)*
 
-[Create one](https://platform.openai.com/api-keys) if you don't have one. The starter uses `gpt-4o-mini` by default for drafting connection notes — at typical signal volume you'll spend pennies a day. Override the model with `OPENAI_MODEL=gpt-4o` if you want longer/better drafts.
+[Create one](https://platform.openai.com/api-keys) if you don't have one. The starter uses `gpt-4o-mini` by default to draft each connection note locally — at typical signal volume you'll spend pennies a day. Override the model with `OPENAI_MODEL=gpt-4o` if you want longer/better drafts.
+
+**Want to use a different model entirely?** Edit `src/lib/agent.ts` — `draftConnectMessage` uses the Vercel AI SDK, so swapping in `@ai-sdk/anthropic`, `@ai-sdk/google`, `@ai-sdk/mistral`, or any OpenAI-compatible provider is a one-line change. You're not locked into OpenAI; the starter just defaults to it.
 
 ### Step 5 — Clone and configure
 
@@ -203,7 +212,7 @@ All settings live in `.env`. Full list with defaults in [`.env.example`](.env.ex
 |---|---|---|
 | `MYAGENTMAIL_API_KEY` | Yes | Tenant master key from https://myagentmail.com/dashboard/api-keys |
 | `MYAGENTMAIL_WEBHOOK_SECRET` | Recommended | Returned when you create a signal. Used for HMAC verification on `/api/webhook`. Without it, the webhook accepts unsigned payloads (dev only). |
-| `OPENAI_API_KEY` | Yes | For drafting connection notes locally |
+| `OPENAI_API_KEY` | Yes (or any AI SDK provider) | For drafting connection notes **locally**. Classification is bundled server-side. Swap providers in `src/lib/agent.ts` if you'd rather use Anthropic / Google / Mistral / a local model. |
 | `OPENAI_MODEL` | No | Default `gpt-4o-mini`. Swap to `gpt-4o` for higher-quality drafts. |
 | `CRON_SECRET` | Yes | Any random string. Only used by the legacy `/api/cron` route — kept for backwards compat with the self-hosted polling mode. |
 | `ROCKETREACH_API_KEY` | No | Enables lead enrichment on `/leads`. Skip if you don't need it. |
