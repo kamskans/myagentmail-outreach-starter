@@ -49,7 +49,7 @@ This whole repo is **~3,000 lines of TypeScript**. Read it. Fork it. Customize t
 
 | # | Step | Where | Cost |
 |---|---|---|---|
-| 1 | **Sign up to MyAgentMail** | https://myagentmail.com/signup | 7-day free trial, no card |
+| 1 | **Sign up to MyAgentMail** | https://myagentmail.com/signup | 7-day free trial; card required, cancel anytime before trial ends |
 | 2 | **Subscribe to the LinkedIn add-on** | Dashboard → Billing | $29/mo (Solo) — required for signals |
 | 3 | **Get an OpenAI API key** | https://platform.openai.com/api-keys | ~$0.01–0.05/day on `gpt-4o-mini` |
 | 4 | **Clone + configure this repo** | (commands below) | Free |
@@ -60,7 +60,7 @@ The classification LLM call happens on MyAgentMail's servers (we use OpenRouter 
 
 ### Step 1 — Sign up to MyAgentMail
 
-Go to https://myagentmail.com/signup. 7-day free trial, no credit card required. After verifying your email you'll land at https://myagentmail.com/dashboard.
+Go to https://myagentmail.com/signup. 7-day free trial — a credit card is required to start the trial, but you can cancel anytime before day 7 and you won't be charged. After verifying your email and selecting a plan you'll land at https://myagentmail.com/dashboard.
 
 ### Step 2 — Subscribe to the LinkedIn add-on
 
