@@ -2,33 +2,49 @@
 
 > Open-source contextual LinkedIn signal monitoring + email outreach, built on [MyAgentMail](https://myagentmail.com).
 >
-> Watch LinkedIn for keywords your prospects post about, then have an agent draft a personalized connection request or cold email — sent via your own MyAgentMail inboxes and your own LinkedIn account. Multi-account capable. Approval queue by default. No vendor lock-in.
+> Define keywords your prospects post about. MyAgentMail watches LinkedIn for you, classifies each new match with an LLM, and webhooks high-intent posts to this app. The agent drafts a personalized connection request, you click Approve, the message sends via your own MyAgentMail account.
 
 ```
-   ┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-   │ Intent signals │───▶│   AI agent     │───▶│ Approval queue │
-   │ (LinkedIn      │    │ (filter +      │    │ (you click     │
-   │  keywords)     │    │  draft)        │    │  Approve)      │
-   └────────────────┘    └────────────────┘    └────────────────┘
-                                                       │
-                                                       ▼
-                                              ┌────────────────┐
-                                              │ MyAgentMail    │
-                                              │ • LinkedIn API │
-                                              │ • Email send   │
-                                              └────────────────┘
+   ┌──────────────────┐         ┌──────────────────────┐
+   │ Define keyword   │ ──────▶ │ MyAgentMail polls    │
+   │ at /managed-     │         │ LinkedIn server-side │
+   │ signals          │         │ + classifies w/ LLM  │
+   └──────────────────┘         └──────────┬───────────┘
+                                           │ webhook (HMAC-signed)
+                                           ▼
+   ┌──────────────────┐         ┌──────────────────────┐
+   │ Approval queue   │ ◀────── │ Local agent drafts   │
+   │ (you click       │         │ a personal note from │
+   │  Approve)        │         │ the post excerpt     │
+   └────────┬─────────┘         └──────────────────────┘
+            │
+            ▼
+   ┌──────────────────┐
+   │ Send via         │
+   │ MyAgentMail      │
+   │ (your account)   │
+   └──────────────────┘
 ```
+
+Polling, deduping, classification — all server-side. No cron job, no LLM bill on you for filtering, no LinkedIn rate-limit math. You only handle the high-intent matches that actually deserve a personal note.
 
 ## What it does
 
 1. **Multi-account LinkedIn**: connect one or more LinkedIn accounts (login flow handles 2FA, or import `li_at` / `JSESSIONID` cookies). Each signal can pin to a specific account.
-2. **Intent signals**: define keywords like `"outbound is broken"` or `"hiring SDR"`. The poller runs on a cron, searches LinkedIn for matching posts, and dedupes against ones it's already seen.
-3. **Agent classification**: an LLM filters each new match — generic content, recruiter spam, and off-topic posts get dropped automatically.
-4. **Personalized draft**: for high-intent matches, the agent writes a 280-char connection note (or DM, or cold email) tied to the specific post.
-5. **Approval queue**: drafts land in a queue. You click Approve (or edit the message first). Switch to autonomous mode with `APPROVAL_MODE=auto` if you trust your prompts.
-6. **Sent via your stack**: connection requests go through MyAgentMail's LinkedIn module; emails go through your own MyAgentMail inbox.
+2. **Managed intent signals**: at `/managed-signals` you define keywords like `"outbound is broken"`. MyAgentMail polls LinkedIn server-side at the cadence you choose (daily / 12h / 6h / manual) using your own session.
+3. **Server-side classification**: every new match is scored by an LLM (`{engage, intent, reason}`) before it ever reaches you. Only matches that pass your minimum-intent filter trigger the webhook.
+4. **HMAC-signed webhook**: matches arrive at this app's `/api/webhook`. We verify the signature and queue them.
+5. **Personalized draft**: the local agent writes a 280-char connection note tied to the specific post.
+6. **Approval queue**: drafts land in a queue. You click Approve (or edit first), and the message sends via MyAgentMail's LinkedIn endpoint.
+7. **Multi-channel**: same flow works for cold email — the action runner sends via your MyAgentMail inbox.
 
 This is a starter, not a SaaS. Clone it, plug in your keys, run it locally or deploy to Vercel.
+
+## How it differs from running everything yourself
+
+Earlier versions of this starter polled LinkedIn locally — that meant running cron, eating the LLM bill, and managing rate-limit logic yourself. Now MyAgentMail's managed signal API handles all of that. You only run the parts that need to be local: the message-draft agent and the approval queue.
+
+If you want the legacy local poller (everything self-hosted, no managed dependency), the original code is still in `/signals` and `src/lib/signal-runner.ts` — call `/api/cron` with `Bearer ${CRON_SECRET}` to run it.
 
 ## Prerequisites
 

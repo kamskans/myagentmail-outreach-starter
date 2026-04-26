@@ -181,3 +181,80 @@ export async function linkedInSendConnection(input: {
 }): Promise<{ ok: boolean; error?: string }> {
   return await request("POST", "/linkedin/connections", input);
 }
+
+// ── LinkedIn Intent Signals (managed) ────────────────────────────────────
+// MyAgentMail polls LinkedIn on the chosen cadence, classifies each match
+// with an LLM, and POSTs high-intent matches to your webhook. You can also
+// pull matches via GET /:id/matches if you'd rather not run a webhook.
+//
+// Docs: https://myagentmail.com/docs#linkedin-signals
+
+export type SignalCadence = "daily" | "every_12h" | "every_6h" | "manual";
+export type SignalIntent = "low" | "medium" | "high";
+
+export type ManagedSignal = {
+  id: string;
+  name: string;
+  query: string;
+  sessionId: string;
+  cadence: SignalCadence;
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+  filterMinIntent: SignalIntent;
+  enabled: boolean;
+  lastPolledAt: string | null;
+  nextPollAt: string | null;
+  lastError: string | null;
+  matchesCount: number;
+  createdAt: string;
+};
+
+export async function listManagedSignals(): Promise<ManagedSignal[]> {
+  const r = await request<{ signals: ManagedSignal[] }>("GET", "/linkedin/signals");
+  return r.signals || [];
+}
+
+export async function createManagedSignal(input: {
+  name: string;
+  query: string;
+  sessionId: string;
+  cadence?: SignalCadence;
+  webhookUrl?: string;
+  filterMinIntent?: SignalIntent;
+}): Promise<ManagedSignal> {
+  const r = await request<{ signal: ManagedSignal }>("POST", "/linkedin/signals", input);
+  return r.signal;
+}
+
+export async function deleteManagedSignal(id: string): Promise<void> {
+  await request("DELETE", `/linkedin/signals/${id}`);
+}
+
+export async function runManagedSignal(id: string): Promise<{ result: any }> {
+  return await request("POST", `/linkedin/signals/${id}/run`);
+}
+
+export type SignalMatchPayload = {
+  id: string;
+  postUrl: string;
+  postExcerpt: string | null;
+  postPostedAt: string | null;
+  author: { name: string | null; profileUrl: string | null; headline: string | null };
+  classification: { engage: boolean; intent: SignalIntent; reason: string } | null;
+  foundAt: string;
+};
+
+export async function listManagedSignalMatches(
+  id: string,
+  opts: { limit?: number; sinceId?: string } = {},
+): Promise<SignalMatchPayload[]> {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.sinceId) params.set("sinceId", opts.sinceId);
+  const q = params.toString();
+  const r = await request<{ matches: SignalMatchPayload[] }>(
+    "GET",
+    `/linkedin/signals/${id}/matches${q ? `?${q}` : ""}`,
+  );
+  return r.matches || [];
+}
