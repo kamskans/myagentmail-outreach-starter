@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, Trash2, Play, Webhook } from "lucide-react";
+import { Plus, Trash2, Play, Webhook, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,15 +68,13 @@ export default function ManagedSignalsPage() {
     toast.success("Signal deleted");
     reload();
   }
-  async function runNow(id: string) {
-    const r = await fetch(`/api/managed-signals/${id}`, { method: "POST" });
-    const data = await r.json();
-    if (data.result?.ok) {
-      toast.success(`Polled — ${data.result.newMatches} new match(es), ${data.result.webhooksQueued} webhook(s) queued`);
-    } else {
-      toast.error(data.result?.errorMessage || data.error || "Run failed");
-    }
-    reload();
+  async function runNow(id: string, e?: React.MouseEvent) {
+    e?.stopPropagation();
+    e?.preventDefault();
+    // Navigate the user to the detail page first so the run-result + new
+    // matches render inline. The detail page kicks off its own runNow on
+    // mount only when ?run=1 is present.
+    window.location.href = `/managed-signals/${id}?run=1`;
   }
 
   return (
@@ -150,41 +149,48 @@ export default function ManagedSignalsPage() {
       ) : (
         <div className="space-y-3">
           {signals.map((s) => (
-            <Card key={s.id} className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold">{s.name}</h3>
-                    <Badge>{CADENCE_LABELS[s.cadence]}</Badge>
-                    {s.webhookUrl ? (
-                      <Badge variant="outline">≥ {s.filterMinIntent} intent</Badge>
-                    ) : (
-                      <Badge variant="outline">Pull only</Badge>
-                    )}
+            <Link key={s.id} href={`/managed-signals/${s.id}`} className="block">
+              <Card className="p-5 transition-colors hover:bg-muted/30">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-semibold">{s.name}</h3>
+                      <Badge>{CADENCE_LABELS[s.cadence]}</Badge>
+                      {s.webhookUrl ? (
+                        <Badge variant="outline">≥ {s.filterMinIntent} intent</Badge>
+                      ) : (
+                        <Badge variant="outline">Pull only</Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 font-mono text-xs text-muted-foreground">&ldquo;{s.query}&rdquo;</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {s.matchesCount} matches · last polled {fmtDate(s.lastPolledAt)}
+                    </p>
+                    {s.lastError ? (
+                      <p className="mt-2 text-[11px] text-amber-700">⚠ {s.lastError}</p>
+                    ) : null}
                   </div>
-                  <p className="mt-1 font-mono text-xs text-muted-foreground">&ldquo;{s.query}&rdquo;</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {s.matchesCount} matches · last polled {fmtDate(s.lastPolledAt)}
-                  </p>
-                  {s.lastError ? (
-                    <p className="mt-2 text-[11px] text-amber-700">⚠ {s.lastError}</p>
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button size="sm" variant="ghost" onClick={(e) => runNow(s.id, e)} title="Run now & view results">
+                      <Play className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        remove(s.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <ChevronRight className="ml-1 h-4 w-4 text-muted-foreground" />
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => runNow(s.id)} title="Run now">
-                    <Play className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => remove(s.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
+              </Card>
+            </Link>
           ))}
         </div>
       )}
