@@ -75,6 +75,122 @@ export async function ensureInbox(username: string): Promise<Inbox> {
   return await createInbox({ username });
 }
 
+export async function getInbox(inboxId: string): Promise<Inbox> {
+  return await request<Inbox>("GET", `/inboxes/${inboxId}`);
+}
+
+// ── Messages (inbox mail) ──────────────────────────────────────────────
+
+export type Message = {
+  id: string;
+  inboxId: string;
+  threadId: string;
+  direction: "inbound" | "outbound";
+  fromAddress: string | null;
+  fromName: string | null;
+  toAddresses: string[] | string;
+  subject: string | null;
+  plainBody: string | null;
+  htmlBody: string | null;
+  isRead: boolean;
+  receivedAt: string | null;
+  sentAt: string | null;
+  createdAt: string;
+};
+
+export async function listMessages(
+  inboxId: string,
+  opts: { direction?: "inbound" | "outbound"; limit?: number; offset?: number } = {},
+): Promise<Message[]> {
+  const params = new URLSearchParams();
+  if (opts.direction) params.set("direction", opts.direction);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.offset) params.set("offset", String(opts.offset));
+  const q = params.toString();
+  const r = await request<{ messages: Message[] }>(
+    "GET",
+    `/inboxes/${inboxId}/messages${q ? `?${q}` : ""}`,
+  );
+  return r.messages || [];
+}
+
+export async function getMessage(inboxId: string, messageId: string): Promise<Message> {
+  return await request<Message>("GET", `/inboxes/${inboxId}/messages/${messageId}`);
+}
+
+export async function sendMessage(
+  inboxId: string,
+  input: {
+    to: string | string[];
+    subject: string;
+    plainBody?: string;
+    htmlBody?: string;
+    replyTo?: string;
+    verified?: boolean;
+  },
+): Promise<{ id: string; threadId: string; status: string; messageId: string }> {
+  return await request("POST", `/inboxes/${inboxId}/send`, input);
+}
+
+export async function replyMessage(
+  inboxId: string,
+  messageId: string,
+  input: { plainBody?: string; htmlBody?: string },
+): Promise<{ id: string; threadId: string; status: string; messageId: string }> {
+  return await request("POST", `/inboxes/${inboxId}/reply/${messageId}`, input);
+}
+
+export async function deleteMessage(inboxId: string, messageId: string): Promise<void> {
+  await request("DELETE", `/inboxes/${inboxId}/messages/${messageId}`);
+}
+
+// ── Drafts ────────────────────────────────────────────────────────────
+
+export type Draft = {
+  id: string;
+  inboxId: string;
+  to: string[] | string | null;
+  cc: string[] | string | null;
+  bcc: string[] | string | null;
+  subject: string | null;
+  plainBody: string | null;
+  htmlBody: string | null;
+  replyToMessageId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function listDrafts(inboxId: string): Promise<Draft[]> {
+  const r = await request<{ drafts: Draft[] }>("GET", `/inboxes/${inboxId}/drafts`);
+  return r.drafts || [];
+}
+
+export async function createDraft(
+  inboxId: string,
+  input: Partial<Pick<Draft, "to" | "cc" | "bcc" | "subject" | "plainBody" | "htmlBody" | "replyToMessageId">>,
+): Promise<Draft> {
+  return await request<Draft>("POST", `/inboxes/${inboxId}/drafts`, input);
+}
+
+export async function updateDraft(
+  inboxId: string,
+  draftId: string,
+  patch: Partial<Pick<Draft, "to" | "cc" | "bcc" | "subject" | "plainBody" | "htmlBody">>,
+): Promise<void> {
+  await request("PATCH", `/inboxes/${inboxId}/drafts/${draftId}`, patch);
+}
+
+export async function sendDraft(
+  inboxId: string,
+  draftId: string,
+): Promise<{ id: string; threadId: string; status: string; messageId: string; draftId: string }> {
+  return await request("POST", `/inboxes/${inboxId}/drafts/${draftId}/send`);
+}
+
+export async function deleteDraft(inboxId: string, draftId: string): Promise<void> {
+  await request("DELETE", `/inboxes/${inboxId}/drafts/${draftId}`);
+}
+
 export async function sendEmail(input: {
   inboxId: string;
   to: string;
