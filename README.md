@@ -90,9 +90,17 @@ One **action** = one LinkedIn API call (a connection request, profile lookup, po
 Dashboard → **API Keys**. Copy the `tk_…` master key. (You only need one — the same key authorizes inbox sends, LinkedIn endpoints, and signal management.)
 
 While you're there, bookmark:
-- **API reference** → https://myagentmail.com/docs (live OpenAPI spec)
+- **API reference** → https://myagentmail.com/docs (live OpenAPI spec, interactive)
+- **Raw OpenAPI** → https://myagentmail.com/openapi.yaml (paste into your AI tool of choice)
 - **Knowledge base** → https://myagentmail.com/kb (concepts, deliverability guides, recipes)
+- **Canonical recipe** → https://myagentmail.com/kb/example-lead-agent ("Build an AI lead agent in 6 API calls" — this starter's reference architecture in long-form)
 - **Blog** → https://myagentmail.com/blog (deeper context)
+
+**For AI-driven development** (Claude Code, Cursor, Windsurf, Cline):
+- **Agent skill** → https://myagentmail.com/skills/myagentmail/SKILL.md (drop into `~/.claude/skills/myagentmail/` so your assistant knows the full email + LinkedIn surface)
+- **LinkedIn deep-dive reference** → https://myagentmail.com/skills/myagentmail/references/linkedin.md (signals, searches, firing rules, multi-session routing)
+- **MCP server** → `npx -y myagentmail-mcp` ([package](https://www.npmjs.com/package/myagentmail-mcp)) — exposes 30+ tools to any MCP-compatible client
+- **TypeScript SDK** → `npm install myagentmail` ([package](https://www.npmjs.com/package/myagentmail)) — typed client if you want to extend this starter beyond the thin wrapper in `src/lib/myagentmail.ts`
 
 ### Step 4 — Get an OpenAI key *(only for local drafting)*
 
@@ -331,9 +339,23 @@ MIT — do whatever you want.
 
 ## Resources
 
+**API + docs**
 - [MyAgentMail homepage](https://myagentmail.com)
-- [API reference](https://myagentmail.com/docs)
-- [Knowledge base](https://myagentmail.com/kb)
+- [API reference](https://myagentmail.com/docs) — interactive OpenAPI
+- [Raw OpenAPI spec](https://myagentmail.com/openapi.yaml)
+- [Knowledge base](https://myagentmail.com/kb) — concepts, recipes, deliverability
+- [Build an AI lead agent in 6 API calls](https://myagentmail.com/kb/example-lead-agent) — this starter's reference architecture
+
+**For AI-driven development**
+- [Agent skill (SKILL.md)](https://myagentmail.com/skills/myagentmail/SKILL.md) — drop into `~/.claude/skills/myagentmail/`
+- [LinkedIn reference](https://myagentmail.com/skills/myagentmail/references/linkedin.md)
+- [Webhooks reference](https://myagentmail.com/skills/myagentmail/references/webhooks.md)
+- [WebSockets reference](https://myagentmail.com/skills/myagentmail/references/websockets.md)
+- [`myagentmail-mcp` on npm](https://www.npmjs.com/package/myagentmail-mcp) — MCP server for Claude Desktop, Cursor, Windsurf, Cline
+- [`myagentmail` on npm](https://www.npmjs.com/package/myagentmail) — TypeScript SDK
+- [`@myagentmail/react` on npm](https://www.npmjs.com/package/@myagentmail/react) — drop-in `<LinkedInConnect />` widget
+
+**Plans + legal**
 - [LinkedIn module pricing](https://myagentmail.com/linkedin#pricing)
 - [LinkedIn module ToS](https://myagentmail.com/terms-linkedin)
 - [Privacy policy](https://myagentmail.com/privacy)
