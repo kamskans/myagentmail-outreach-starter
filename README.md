@@ -131,18 +131,34 @@ Open http://localhost:3000. You'll see the setup checklist on the homepage — m
 
 ### Step 6 — Connect a LinkedIn account
 
-In the starter app: **LinkedIn accounts → Connect account**.
+In the starter app: **LinkedIn accounts → Add account**.
 
-Two ways to connect, either works:
+The connect flow is provided by the **`@myagentmail/react`** drop-in widget — same component you can drop into your own app once you fork this. It handles every LinkedIn auth path with one component import + one server-side proxy line:
+
+```tsx
+// src/app/accounts/page.tsx
+<LinkedInConnect
+  proxyUrl="/api/myagentmail/linkedin"
+  onConnected={({ sessionId }) => { /* save it */ }}
+/>
+```
+
+```ts
+// src/app/api/myagentmail/linkedin/[...path]/route.ts
+import { linkedInProxyHandler } from "@myagentmail/react/server";
+export const { POST } = linkedInProxyHandler({ apiKey: process.env.MYAGENTMAIL_API_KEY! });
+```
+
+The widget itself supports two ways to connect — either works:
 
 #### Option A — Email + password
 
-Type the LinkedIn email + password. LinkedIn will issue a verification challenge and **the same challenge can be satisfied two ways simultaneously**:
+Type the LinkedIn email + password. LinkedIn will issue a verification challenge — and the same challenge can be satisfied two ways at once:
 
-1. **Tap the push notification on the LinkedIn mobile app** ("Sign-in request — Yes, it's me"). The starter polls the approval endpoint every 3 seconds in the background and auto-completes when you tap.
+1. **Tap the push notification on the LinkedIn mobile app** ("Sign-in request — Yes, it's me"). The widget polls the approval endpoint in the background and auto-completes when you tap.
 2. **Type the 6-digit PIN** that LinkedIn emails to the account.
 
-Whichever you finish first wins. Both paths are shown in the dialog at the same time — pick whichever is more convenient. There's also a `/sessions/poll` endpoint hit automatically; you don't have to do anything for the mobile path other than tap the push.
+Whichever you finish first wins. Both paths are shown side-by-side in the widget. Most LinkedIn integrations only handle the PIN, leaving users confused when they tap the mobile push and nothing happens — this widget handles both natively.
 
 #### Option B — Import cookies
 
