@@ -29,7 +29,7 @@ type SearchRow = {
   query: string;
   lookback: Lookback;
   minIntent: Intent | null;
-  intentDescription: string | null;
+  intentDescription: string;
   resultCount: number;
   tookMs: number | null;
   errorCode: string | null;
@@ -100,7 +100,7 @@ export default function HistoricalSearchPage() {
         query: query.trim(),
         lookback,
         minIntent: minIntent === "any" ? undefined : minIntent,
-        intentDescription: intentDescription.trim() || undefined,
+        intentDescription: intentDescription.trim(),
         limit: 50,
       }),
     });
@@ -120,7 +120,7 @@ export default function HistoricalSearchPage() {
     setQuery(s.query);
     setLookback(s.lookback);
     setMinIntent(s.minIntent ?? "any");
-    setIntentDescription(s.intentDescription ?? "");
+    setIntentDescription(s.intentDescription);
     const r = await fetch(`/api/historical-search/${s.id}`);
     const data = await r.json();
     if (data.error) {
@@ -215,7 +215,7 @@ export default function HistoricalSearchPage() {
           </div>
         </div>
         <div className="mt-3">
-          <Label htmlFor="search-rule">Firing rule (optional)</Label>
+          <Label htmlFor="search-rule">Firing rule</Label>
           <textarea
             id="search-rule"
             rows={2}
@@ -224,16 +224,20 @@ export default function HistoricalSearchPage() {
             value={intentDescription}
             onChange={(e) => setIntentDescription(e.target.value)}
             maxLength={2000}
+            required
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Plain English. The classifier treats this as authoritative — the keyword is just a coarse pre-filter.
+            Plain English. The classifier uses this as the authoritative definition of what should fire — the keyword is just a coarse pre-filter.
           </p>
         </div>
         <div className="mt-3 flex items-center justify-between">
           <p className="text-[11px] text-muted-foreground">
             Each search uses one LinkedIn API call against the connected account.
           </p>
-          <Button onClick={runSearch} disabled={busy || !query.trim() || !sessionId}>
+          <Button
+            onClick={runSearch}
+            disabled={busy || !query.trim() || !sessionId || !intentDescription.trim()}
+          >
             <SearchIcon className="h-4 w-4" />
             {busy ? "Searching…" : "Run search"}
           </Button>

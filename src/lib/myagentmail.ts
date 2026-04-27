@@ -224,7 +224,7 @@ export type ManagedSignal = {
   webhookUrl: string | null;
   webhookSecret: string | null;
   filterMinIntent: SignalIntent;
-  intentDescription: string | null;
+  intentDescription: string;
   enabled: boolean;
   lastPolledAt: string | null;
   nextPollAt: string | null;
@@ -246,13 +246,13 @@ export async function createManagedSignal(input: {
   webhookUrl?: string;
   filterMinIntent?: SignalIntent;
   /**
-   * Optional plain-English firing rule. When set, the classifier treats
-   * it as authoritative and the keyword is just a coarse pre-filter.
-   * Example: "Flag as ready when the author is a founder/operator
-   * complaining about cold email — skip vendors, agencies, and content
-   * marketers."
+   * Plain-English firing rule. The classifier uses this as the
+   * authoritative definition of what should fire — the keyword is just
+   * a coarse pre-filter. Example: "Flag as ready when the author is a
+   * founder/operator complaining about cold email — skip vendors,
+   * agencies, and content marketers."
    */
-  intentDescription?: string;
+  intentDescription: string;
 }): Promise<ManagedSignal> {
   const r = await request<{ signal: ManagedSignal }>("POST", "/linkedin/signals", input);
   return r.signal;
@@ -307,7 +307,7 @@ export type HistoricalSearch = {
   query: string;
   lookback: SearchLookback;
   minIntent: SignalIntent | null;
-  intentDescription: string | null;
+  intentDescription: string;
   resultCount: number;
   tookMs: number | null;
   errorCode: string | null;
@@ -330,7 +330,7 @@ export async function runHistoricalSearch(input: {
   lookback?: SearchLookback;
   minIntent?: SignalIntent;
   /** See createManagedSignal — same semantics. */
-  intentDescription?: string;
+  intentDescription: string;
   limit?: number;
 }): Promise<{ search: HistoricalSearch; results: HistoricalSearchResult[] }> {
   return await request<{ search: HistoricalSearch; results: HistoricalSearchResult[] }>(

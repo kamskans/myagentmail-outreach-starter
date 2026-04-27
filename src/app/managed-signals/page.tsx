@@ -236,7 +236,7 @@ function NewSignalForm({
         cadence,
         webhookUrl: webhookUrl.trim() || undefined,
         filterMinIntent,
-        intentDescription: intentDescription.trim() || undefined,
+        intentDescription: intentDescription.trim(),
       }),
     });
     const data = await r.json();
@@ -274,7 +274,7 @@ function NewSignalForm({
             onChange={(e) => setQuery(e.target.value)}
           />
         </Field>
-        <Field id="rule" label="Firing rule (optional)">
+        <Field id="rule" label="Firing rule">
           <textarea
             id="rule"
             rows={3}
@@ -283,9 +283,10 @@ function NewSignalForm({
             value={intentDescription}
             onChange={(e) => setIntentDescription(e.target.value)}
             maxLength={2000}
+            required
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Plain English. The classifier treats this as authoritative — the keyword is just a coarse pre-filter. Leave blank for default scoring.
+            Plain English. The classifier uses this as the authoritative definition of what should fire — the keyword is just a coarse pre-filter.
           </p>
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -339,7 +340,10 @@ function NewSignalForm({
             </select>
           </Field>
         ) : null}
-        <Button onClick={submit} disabled={busy || !name || !query || !sessionId}>
+        <Button
+          onClick={submit}
+          disabled={busy || !name || !query || !sessionId || !intentDescription.trim()}
+        >
           {busy ? "Creating…" : "Create signal"}
         </Button>
       </div>
