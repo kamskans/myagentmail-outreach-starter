@@ -11,9 +11,11 @@
  *   PATCH/DELETE /v1/inboxes/{id}/drafts/{did}         ← edit / discard
  *   POST   /v1/inboxes/{id}/drafts/{did}/send          ← send and consume draft
  *
- * The starter holds no mail state locally — MyAgentMail is the source of
- * truth. We poll inbound every 30s while the user is on the Inbox tab so
- * new mail surfaces without manual refresh.
+ * Real-time delivery: an SSE bridge at /api/inboxes/[id]/stream opens
+ * a server-side WebSocket to MyAgentMail (master key stays on the
+ * server) and forwards `message.received` / `message.sent` /
+ * `message.bounced` events to the browser. New mail surfaces within
+ * a second of LinkedIn delivering it; no polling required.
  */
 
 import * as React from "react";
@@ -128,12 +130,36 @@ export default function InboxDetailPage() {
       .catch(() => setInbox(null));
   }, [inboxId]);
 
-  // Poll the inbox folder for new mail while the user has it open.
+  // Real-time updates via Server-Sent Events. The server maintains a
+  // WebSocket to MyAgentMail and forwards every relevant event back
+  // here. We re-pull the folder on each event so the UI reflects the
+  // upstream's canonical state (read flags, dedup, reply threading).
+  const [liveStatus, setLiveStatus] = React.useState<"connecting" | "live" | "offline">(
+    "connecting",
+  );
   React.useEffect(() => {
-    if (folder !== "inbox") return;
-    const t = setInterval(reload, 30_000);
-    return () => clearInterval(t);
-  }, [folder, reload]);
+    if (!inboxId) return;
+    const es = new EventSource(`/api/inboxes/${inboxId}/stream`);
+    const onOpen = () => setLiveStatus("live");
+    const onError = () => setLiveStatus("offline");
+    es.addEventListener("open", onOpen);
+    es.addEventListener("error", onError);
+
+    // Refresh on any inbound or outbound event affecting this inbox.
+    const onMail = () => reload();
+    es.addEventListener("message.received", onMail);
+    es.addEventListener("message.sent", onMail);
+    es.addEventListener("message.bounced", onMail);
+
+    return () => {
+      es.removeEventListener("open", onOpen);
+      es.removeEventListener("error", onError);
+      es.removeEventListener("message.received", onMail);
+      es.removeEventListener("message.sent", onMail);
+      es.removeEventListener("message.bounced", onMail);
+      es.close();
+    };
+  }, [inboxId, reload]);
 
   // When a message is selected, fetch the full body (and mark read).
   React.useEffect(() => {
@@ -203,11 +229,10 @@ export default function InboxDetailPage() {
           <h1 className="truncate text-2xl font-bold tracking-tight">
             {inbox?.email || inboxId.slice(0, 8)}
           </h1>
-          {inbox?.displayName ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Display name: {inbox.displayName}
-            </p>
-          ) : null}
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            {inbox?.displayName ? <span>Display name: {inbox.displayName}</span> : null}
+            <LiveBadge status={liveStatus} />
+          </div>
         </div>
         <Button onClick={openCompose}>
           <Plus className="h-4 w-4" />
@@ -700,5 +725,28 @@ function ComposeModal({
         </div>
       </Card>
     </div>
+  );
+}
+
+function LiveBadge({ status }: { status: "connecting" | "live" | "offline" }) {
+  const tone =
+    status === "live"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : status === "connecting"
+        ? "text-muted-foreground"
+        : "text-amber-600 dark:text-amber-400";
+  const dotTone =
+    status === "live"
+      ? "bg-emerald-500"
+      : status === "connecting"
+        ? "bg-muted-foreground/60 animate-pulse"
+        : "bg-amber-500";
+  const label =
+    status === "live" ? "Live" : status === "connecting" ? "Connecting…" : "Reconnecting…";
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 text-[11px]", tone)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", dotTone)} />
+      {label}
+    </span>
   );
 }
