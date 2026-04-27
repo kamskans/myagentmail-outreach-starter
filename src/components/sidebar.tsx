@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Linkedin, Inbox, Radar, Webhook, Users, ListTodo, Settings } from "lucide-react";
+import { LayoutGrid, Linkedin, Inbox, Radar, Webhook, Search, Users, ListTodo, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -10,6 +10,7 @@ const NAV = [
   { href: "/accounts", label: "LinkedIn accounts", icon: Linkedin },
   { href: "/inboxes", label: "Inboxes", icon: Inbox },
   { href: "/managed-signals", label: "Intent signals", icon: Webhook },
+  { href: "/historical-search", label: "Search history", icon: Search },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/queue", label: "Approval queue", icon: ListTodo },
   { href: "/setup", label: "Setup", icon: Settings },

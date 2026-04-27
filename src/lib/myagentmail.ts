@@ -281,3 +281,66 @@ export async function listManagedSignalMatches(
   );
   return r.matches || [];
 }
+
+// ── LinkedIn Historical Search ───────────────────────────────────────────
+// One-shot keyword lookup across the past 24h / week / month. Different
+// product surface from signals: synchronous, returns the hit list inline,
+// no webhook, no recurring schedule, no dedup. Use this when you want to
+// know who *has* talked about a keyword — not who *will* talk about it.
+//
+// Docs: https://myagentmail.com/docs#linkedin-searches
+
+export type SearchLookback = "past-24h" | "past-week" | "past-month";
+
+export type HistoricalSearch = {
+  id: string;
+  sessionId: string;
+  query: string;
+  lookback: SearchLookback;
+  minIntent: SignalIntent | null;
+  resultCount: number;
+  tookMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+};
+
+export type HistoricalSearchResult = {
+  postUrl: string;
+  postExcerpt: string;
+  postedAt: string | null;
+  author: { name: string; profileUrl: string; headline: string | null };
+  classification: { engage: boolean; intent: SignalIntent; reason: string };
+  rank: number;
+};
+
+export async function runHistoricalSearch(input: {
+  sessionId: string;
+  query: string;
+  lookback?: SearchLookback;
+  minIntent?: SignalIntent;
+  limit?: number;
+}): Promise<{ search: HistoricalSearch; results: HistoricalSearchResult[] }> {
+  return await request<{ search: HistoricalSearch; results: HistoricalSearchResult[] }>(
+    "POST",
+    "/linkedin/searches",
+    input,
+  );
+}
+
+export async function listHistoricalSearches(
+  opts: { limit?: number } = {},
+): Promise<HistoricalSearch[]> {
+  const q = opts.limit ? `?limit=${opts.limit}` : "";
+  const r = await request<{ searches: HistoricalSearch[] }>("GET", `/linkedin/searches${q}`);
+  return r.searches || [];
+}
+
+export async function getHistoricalSearch(
+  id: string,
+): Promise<{ search: HistoricalSearch; results: HistoricalSearchResult[] }> {
+  return await request<{ search: HistoricalSearch; results: HistoricalSearchResult[] }>(
+    "GET",
+    `/linkedin/searches/${id}`,
+  );
+}
