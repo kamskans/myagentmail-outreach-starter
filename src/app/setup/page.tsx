@@ -109,11 +109,14 @@ export default function SetupPage() {
 
       <Step n={4} title="Create your first intent signal" done={s.signals.enabled > 0}>
         <p className="text-sm text-muted-foreground">
-          A signal is a keyword the agent watches on LinkedIn. Each new matching post is classified;
-          high-intent ones get a personalized message queued for your approval.
+          A signal is a keyword + plain-English firing rule the agent watches on LinkedIn. Each new
+          matching post is classified; high-intent ones get a personalized message queued for your
+          approval. The guided wizard walks you through it in 5 steps.
         </p>
         <Button asChild className="mt-3" variant={s.signals.enabled > 0 ? "outline" : "default"}>
-          <Link href="/signals">{s.signals.enabled > 0 ? "Manage signals" : "Create signal"}</Link>
+          <Link href="/onboarding">
+            {s.signals.enabled > 0 ? "Set up another agent" : "Set up an agent"}
+          </Link>
         </Button>
       </Step>
 
