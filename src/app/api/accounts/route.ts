@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import {
   linkedInLogin,
   linkedInVerifyChallenge,
+  linkedInPollMobileApproval,
   linkedInImportCookies,
   listLinkedInSessions,
 } from "@/lib/myagentmail";
@@ -42,6 +43,15 @@ const Verify = z.object({
   pin: z.string().min(1),
   label: z.string().optional(),
 });
+// LinkedIn challenges are dual-path: the user can satisfy them by typing
+// the PIN they were emailed OR by tapping "Yes, it's me" in the LinkedIn
+// mobile app. We expose both via the same backend, the UI runs them
+// concurrently, whichever completes first wins.
+const Poll = z.object({
+  mode: z.literal("poll"),
+  challengeId: z.string(),
+  label: z.string().optional(),
+});
 const Import = z.object({
   mode: z.literal("import"),
   liAt: z.string().min(1),
@@ -51,7 +61,7 @@ const Import = z.object({
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const parsed = z.discriminatedUnion("mode", [Login, Verify, Import]).safeParse(body);
+  const parsed = z.discriminatedUnion("mode", [Login, Verify, Poll, Import]).safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload", detail: parsed.error.flatten() }, { status: 400 });
   }
@@ -61,6 +71,7 @@ export async function POST(req: Request) {
   let result: any;
   if (data.mode === "login") result = await linkedInLogin(data);
   else if (data.mode === "verify") result = await linkedInVerifyChallenge(data);
+  else if (data.mode === "poll") result = await linkedInPollMobileApproval(data);
   else result = await linkedInImportCookies(data);
 
   if ("ok" in result && result.ok && "sessionId" in result) {
@@ -70,5 +81,5 @@ export async function POST(req: Request) {
     ).run(id, data.label ?? "LinkedIn account", result.sessionId);
     return NextResponse.json({ ok: true, accountId: id, ...result });
   }
-  return NextResponse.json(result, { status: result.ok ? 200 : 200 });
+  return NextResponse.json(result);
 }

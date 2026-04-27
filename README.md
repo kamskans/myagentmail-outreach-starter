@@ -133,13 +133,35 @@ Open http://localhost:3000. You'll see the setup checklist on the homepage — m
 
 In the starter app: **LinkedIn accounts → Connect account**.
 
-Two ways:
-- **Email + password** — handles LinkedIn's PIN / mobile-app verification flow.
-- **Import cookies** — if you'd rather paste an `li_at` and `JSESSIONID` from your existing browser session.
+Two ways to connect, either works:
 
-Either way, the credentials are sent to MyAgentMail and AES-256-GCM encrypted at rest. You can revoke any account from the same screen — the cookies are wiped.
+#### Option A — Email + password
 
-> ⚠️ **Use a real LinkedIn account that has activity history.** Brand-new or empty accounts are flagged faster. The default polling cadence is conservative (daily) for exactly this reason.
+Type the LinkedIn email + password. LinkedIn will issue a verification challenge and **the same challenge can be satisfied two ways simultaneously**:
+
+1. **Tap the push notification on the LinkedIn mobile app** ("Sign-in request — Yes, it's me"). The starter polls the approval endpoint every 3 seconds in the background and auto-completes when you tap.
+2. **Type the 6-digit PIN** that LinkedIn emails to the account.
+
+Whichever you finish first wins. Both paths are shown in the dialog at the same time — pick whichever is more convenient. There's also a `/sessions/poll` endpoint hit automatically; you don't have to do anything for the mobile path other than tap the push.
+
+#### Option B — Import cookies
+
+If you'd rather skip the password flow entirely, paste the `li_at` and `JSESSIONID` cookies from a logged-in browser session:
+
+1. Open https://www.linkedin.com in Chrome (must be logged in)
+2. DevTools (⌘⌥I) → **Application** → **Cookies** → `https://www.linkedin.com`
+3. Copy `li_at` (long string) and `JSESSIONID` (the value WITH the surrounding quotes — looks like `"ajax:1234567890"`)
+4. Paste both into the **Import cookies** tab in the dialog
+
+This path bypasses LinkedIn's verification entirely because we're using cookies that LinkedIn already issued to your existing browser session. **Recommended for production-grade integrations** — most outreach tools default to this path.
+
+#### Either way
+
+- Credentials and cookies are sent to MyAgentMail and **AES-256-GCM encrypted at rest**. We never log them.
+- You can revoke any account from the same screen — the stored cookies are wiped.
+- After connection, all subsequent calls (post search, profile lookup, send connection, intent-signal polling) use the stored session — no further verification needed.
+
+> ⚠️ **Use a real LinkedIn account that has activity history.** Brand-new or empty accounts are flagged faster by LinkedIn's anti-automation systems. The default signal-polling cadence is conservative (daily) for exactly this reason.
 
 ### Step 7 — Create your first signal
 

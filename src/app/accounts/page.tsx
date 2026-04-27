@@ -127,6 +127,12 @@ function AddAccountForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
   const [liAt, setLiAt] = React.useState("");
   const [jsess, setJsess] = React.useState("");
   const [challengeId, setChallengeId] = React.useState("");
+  // Mobile-app polling state. LinkedIn issues challenges that can be
+  // satisfied EITHER by the emailed PIN or by tapping the LinkedIn
+  // mobile-app push notification. We poll the mobile path in the
+  // background while the user types (or doesn't type) the PIN.
+  const [mobileStatus, setMobileStatus] = React.useState<"waiting" | "approved" | "expired">("waiting");
+  const completedRef = React.useRef(false);
 
   async function login() {
     setBusy(true);
@@ -142,8 +148,9 @@ function AddAccountForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
         onDone();
       } else if (data.challenge && data.challengeId) {
         setChallengeId(data.challengeId);
+        setMobileStatus("waiting");
+        completedRef.current = false;
         setStep("challenge");
-        toast.message(`PIN sent to ${email}`);
       } else {
         toast.error(data.error || "Login failed");
       }
@@ -163,6 +170,7 @@ function AddAccountForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
       });
       const data = await r.json();
       if (data.ok && data.accountId) {
+        completedRef.current = true; // stops the parallel mobile poll
         toast.success("Account added");
         onDone();
       } else {
@@ -173,6 +181,47 @@ function AddAccountForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
     }
     setBusy(false);
   }
+
+  // Background poll for the mobile-app approval path. Runs only while the
+  // challenge step is showing AND we haven't completed via PIN yet.
+  React.useEffect(() => {
+    if (step !== "challenge" || !challengeId) return;
+    let cancelled = false;
+    async function pollOnce() {
+      if (cancelled || completedRef.current) return;
+      try {
+        const r = await fetch("/api/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "poll", challengeId, label }),
+        });
+        const data = await r.json();
+        if (cancelled || completedRef.current) return;
+        if (data.ok && data.accountId) {
+          completedRef.current = true;
+          setMobileStatus("approved");
+          toast.success("Account added — approved on mobile");
+          onDone();
+          return;
+        }
+        if (data.error && /expired|not.found/i.test(String(data.error))) {
+          setMobileStatus("expired");
+          return; // stop polling
+        }
+        // pending — schedule next tick
+        setTimeout(pollOnce, 3000);
+      } catch {
+        // Transient network error — retry slower
+        if (!cancelled) setTimeout(pollOnce, 5000);
+      }
+    }
+    // First poll after 2s (give LinkedIn a moment to deliver the push)
+    const t = setTimeout(pollOnce, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [step, challengeId, label, onDone]);
 
   async function importCookies() {
     setBusy(true);
@@ -271,19 +320,63 @@ function AddAccountForm({ onDone, onCancel }: { onDone: () => void; onCancel: ()
           )}
         </>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            LinkedIn sent a verification PIN to <strong>{email}</strong>. Enter it below.
+            LinkedIn issued a verification challenge for <strong>{email}</strong>.
+            Complete <em>either</em> path below — whichever you finish first will
+            connect your account.
           </p>
-          <Field id="pin" label="PIN">
-            <Input id="pin" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="123456" />
-          </Field>
+
+          {/* Mobile app path */}
+          <div className="rounded-md border bg-muted/40 p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5">
+                {mobileStatus === "approved" ? (
+                  <span className="inline-block h-5 w-5 rounded-full bg-emerald-500 text-center text-xs leading-5 text-white">
+                    ✓
+                  </span>
+                ) : mobileStatus === "expired" ? (
+                  <span className="inline-block h-5 w-5 rounded-full bg-rose-500 text-center text-xs leading-5 text-white">
+                    !
+                  </span>
+                ) : (
+                  <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-primary" />
+                )}
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium">Approve on the LinkedIn mobile app</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {mobileStatus === "approved"
+                    ? "Approved! Connecting your account…"
+                    : mobileStatus === "expired"
+                      ? "The challenge expired. Click Back and log in again."
+                      : "Open LinkedIn on your phone — there should be a sign-in request notification. Tap “Yes, it’s me”. We’re polling for the result."}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* PIN path */}
+          <div className="rounded-md border bg-background p-4">
+            <p className="mb-3 text-sm font-medium">Or enter the PIN we emailed you</p>
+            <Field id="pin" label="6-digit PIN from LinkedIn email">
+              <Input
+                id="pin"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="123456"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            </Field>
+          </div>
+
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep("form")}>
               Back
             </Button>
             <Button onClick={verify} disabled={busy || !pin}>
-              {busy ? "Verifying…" : "Verify"}
+              {busy ? "Verifying…" : "Verify PIN"}
             </Button>
           </div>
         </div>

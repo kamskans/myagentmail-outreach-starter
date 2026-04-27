@@ -134,6 +134,29 @@ export async function linkedInVerifyChallenge(input: {
   return await request("POST", "/linkedin/sessions/verify", input);
 }
 
+/**
+ * Poll for the mobile-app approval path. LinkedIn often issues a
+ * challenge that the user can satisfy EITHER by typing a PIN that was
+ * emailed to them OR by tapping "Yes, it's me" in the LinkedIn mobile
+ * app — the same single challenge accepts whichever path arrives first.
+ *
+ * Returns:
+ *   - 200 + sessionId  — user approved on the mobile app
+ *   - 202 + pending   — still waiting; poll again
+ *   - 401             — challenge expired or rejected
+ */
+export type LinkedInPollResult =
+  | { ok: true; sessionId: string; label: string | null; createdAt: string }
+  | { ok: false; pending: true; error?: string }
+  | { ok: false; error: string };
+
+export async function linkedInPollMobileApproval(input: {
+  challengeId: string;
+  label?: string;
+}): Promise<LinkedInPollResult> {
+  return await request("POST", "/linkedin/sessions/poll", input);
+}
+
 export async function linkedInImportCookies(input: {
   liAt: string;
   jsessionId: string;
