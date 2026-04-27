@@ -218,6 +218,7 @@ function NewSignalForm({
   const [sessionId, setSessionId] = React.useState(sessions[0]?.id || "");
   const [cadence, setCadence] = React.useState<Cadence>("daily");
   const [filterMinIntent, setFilterMinIntent] = React.useState<Intent>("medium");
+  const [intentDescription, setIntentDescription] = React.useState("");
   const [webhookUrl, setWebhookUrl] = React.useState(
     typeof window === "undefined" ? "" : `${window.location.origin}/api/webhook`,
   );
@@ -235,6 +236,7 @@ function NewSignalForm({
         cadence,
         webhookUrl: webhookUrl.trim() || undefined,
         filterMinIntent,
+        intentDescription: intentDescription.trim() || undefined,
       }),
     });
     const data = await r.json();
@@ -271,6 +273,20 @@ function NewSignalForm({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+        </Field>
+        <Field id="rule" label="Firing rule (optional)">
+          <textarea
+            id="rule"
+            rows={3}
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            placeholder="e.g. Flag as ready when the author is a founder/operator complaining about cold email — skip vendors selling outbound tools, agencies, and content marketers."
+            value={intentDescription}
+            onChange={(e) => setIntentDescription(e.target.value)}
+            maxLength={2000}
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Plain English. The classifier treats this as authoritative — the keyword is just a coarse pre-filter. Leave blank for default scoring.
+          </p>
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field id="session" label="LinkedIn account">

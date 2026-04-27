@@ -29,6 +29,7 @@ type SearchRow = {
   query: string;
   lookback: Lookback;
   minIntent: Intent | null;
+  intentDescription: string | null;
   resultCount: number;
   tookMs: number | null;
   errorCode: string | null;
@@ -60,6 +61,7 @@ export default function HistoricalSearchPage() {
   const [sessionId, setSessionId] = React.useState("");
   const [lookback, setLookback] = React.useState<Lookback>("past-week");
   const [minIntent, setMinIntent] = React.useState<Intent | "any">("any");
+  const [intentDescription, setIntentDescription] = React.useState("");
 
   const [busy, setBusy] = React.useState(false);
   const [results, setResults] = React.useState<ResultRow[] | null>(null);
@@ -98,6 +100,7 @@ export default function HistoricalSearchPage() {
         query: query.trim(),
         lookback,
         minIntent: minIntent === "any" ? undefined : minIntent,
+        intentDescription: intentDescription.trim() || undefined,
         limit: 50,
       }),
     });
@@ -117,6 +120,7 @@ export default function HistoricalSearchPage() {
     setQuery(s.query);
     setLookback(s.lookback);
     setMinIntent(s.minIntent ?? "any");
+    setIntentDescription(s.intentDescription ?? "");
     const r = await fetch(`/api/historical-search/${s.id}`);
     const data = await r.json();
     if (data.error) {
@@ -209,6 +213,21 @@ export default function HistoricalSearchPage() {
               <option value="high">High only</option>
             </select>
           </div>
+        </div>
+        <div className="mt-3">
+          <Label htmlFor="search-rule">Firing rule (optional)</Label>
+          <textarea
+            id="search-rule"
+            rows={2}
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            placeholder="e.g. Only show me founders/operators complaining about cold email — skip vendors selling outbound tools, agencies, and content marketers."
+            value={intentDescription}
+            onChange={(e) => setIntentDescription(e.target.value)}
+            maxLength={2000}
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Plain English. The classifier treats this as authoritative — the keyword is just a coarse pre-filter.
+          </p>
         </div>
         <div className="mt-3 flex items-center justify-between">
           <p className="text-[11px] text-muted-foreground">
