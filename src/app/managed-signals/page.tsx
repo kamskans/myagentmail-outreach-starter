@@ -221,7 +221,8 @@ function NewSignalForm({
 }) {
   const [name, setName] = React.useState("");
   const [query, setQuery] = React.useState("");
-  const [sessionId, setSessionId] = React.useState(sessions[0]?.id || "");
+  // "" = auto-distribute (recommended). Specific id = pin.
+  const [sessionId, setSessionId] = React.useState("");
   const [cadence, setCadence] = React.useState<Cadence>("daily");
   const [filterMinIntent, setFilterMinIntent] = React.useState<Intent>("medium");
   const [intentDescription, setIntentDescription] = React.useState("");
@@ -238,7 +239,7 @@ function NewSignalForm({
       body: JSON.stringify({
         name,
         query,
-        sessionId,
+        sessionId: sessionId || null,
         cadence,
         webhookUrl: webhookUrl.trim() || undefined,
         filterMinIntent,
@@ -299,13 +300,18 @@ function NewSignalForm({
           <Field id="session" label="LinkedIn account">
             <select
               id="session"
-              value={sessionId}
-              onChange={(e) => setSessionId(e.target.value)}
+              value={sessionId || "__auto__"}
+              onChange={(e) =>
+                setSessionId(e.target.value === "__auto__" ? "" : e.target.value)
+              }
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             >
+              <option value="__auto__">
+                Auto-distribute (recommended)
+              </option>
               {sessions.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.label || s.id.slice(0, 8)}
+                  Pin to: {s.label || s.id.slice(0, 8)}
                 </option>
               ))}
             </select>
@@ -348,7 +354,13 @@ function NewSignalForm({
         ) : null}
         <Button
           onClick={submit}
-          disabled={busy || !name || !query || !sessionId || !intentDescription.trim()}
+          disabled={
+            busy ||
+            !name ||
+            !query ||
+            !intentDescription.trim() ||
+            sessions.length === 0
+          }
         >
           {busy ? "Creating…" : "Create signal"}
         </Button>

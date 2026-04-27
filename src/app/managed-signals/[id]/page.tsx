@@ -51,8 +51,16 @@ type Match = {
   postUrl: string;
   postExcerpt: string | null;
   postPostedAt: string | null;
-  author: { name: string | null; profileUrl: string | null; headline: string | null };
+  author: {
+    name: string | null;
+    profileUrl: string | null;
+    headline: string | null;
+    role: string | null;
+    company: string | null;
+  };
   classification: { engage: boolean; intent: Intent; reason: string } | null;
+  triageScore: number | null;
+  pendingEnrichment: boolean;
   foundAt: string;
 };
 
@@ -314,9 +322,18 @@ export default function SignalDetailPage() {
                           {fmtDate(m.foundAt)}
                         </span>
                       </div>
-                      {m.author.headline ? (
+                      {m.author.role || m.author.company ? (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {[m.author.role, m.author.company].filter(Boolean).join(" · ")}
+                        </p>
+                      ) : m.author.headline ? (
                         <p className="mt-0.5 text-[11px] text-muted-foreground">
                           {m.author.headline}
+                        </p>
+                      ) : null}
+                      {m.pendingEnrichment ? (
+                        <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                          ⏳ Pending enrichment — profile lookup deferred to next poll
                         </p>
                       ) : null}
                       <p className="mt-1.5 line-clamp-3 text-xs">

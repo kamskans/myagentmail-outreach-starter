@@ -81,14 +81,15 @@ export default function OnboardingPage() {
 
   const [launching, setLaunching] = React.useState(false);
 
-  // Load existing sessions for step 1
+  // Load existing sessions for step 1. We do NOT auto-pick a session
+  // anymore — the new default is "" = auto-distribute, which uses
+  // every healthy account the tenant has connected.
   const reloadSessions = React.useCallback(async () => {
     const r = await fetch("/api/managed-signals");
     const d = await r.json().catch(() => ({}));
     const list: Session[] = d.sessions || [];
     setSessions(list);
-    if (!sessionId && list[0]) setSessionId(list[0].id);
-  }, [sessionId]);
+  }, []);
 
   React.useEffect(() => {
     reloadSessions();
@@ -108,7 +109,7 @@ export default function OnboardingPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sessionId,
+        sessionId: sessionId || null,
         query: keyword.trim(),
         lookback: "past-month" as Lookback,
         minIntent: PRECISION_TO_FILTER[precision],
@@ -133,7 +134,7 @@ export default function OnboardingPage() {
       body: JSON.stringify({
         name: name.trim(),
         query: keyword.trim(),
-        sessionId,
+        sessionId: sessionId || null,
         cadence: "every_6h",
         filterMinIntent: PRECISION_TO_FILTER[precision],
         intentDescription: intentDescription.trim(),
@@ -155,7 +156,9 @@ export default function OnboardingPage() {
   const canAdvance = (() => {
     switch (STEPS[step].id) {
       case "linkedin":
-        return Boolean(sessionId);
+        // Auto-distribute is valid (sessionId === ""). The gate is
+        // simply: at least one connected account.
+        return sessions.length > 0;
       case "icp":
         return name.trim().length > 0 && keyword.trim().length >= 2 && intentDescription.trim().length >= 10;
       case "precision":
@@ -189,20 +192,30 @@ export default function OnboardingPage() {
           </p>
           {sessions.length > 0 ? (
             <div className="mt-4 space-y-2">
-              <Label>Use an existing account</Label>
+              <Label>Routing</Label>
               <select
-                value={sessionId}
-                onChange={(e) => setSessionId(e.target.value)}
+                value={sessionId || "__auto__"}
+                onChange={(e) =>
+                  setSessionId(e.target.value === "__auto__" ? "" : e.target.value)
+                }
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
+                <option value="__auto__">
+                  Auto-distribute across all {sessions.length} connected{" "}
+                  {sessions.length === 1 ? "account" : "accounts"} (recommended)
+                </option>
                 {sessions.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.label || s.id.slice(0, 8)}
+                    Pin to: {s.label || s.id.slice(0, 8)}
                   </option>
                 ))}
               </select>
               <p className="text-[11px] text-muted-foreground">
-                …or connect another below.
+                Auto spreads polling and profile lookups across every connected account, multiplying
+                your daily LinkedIn quota and protecting any single account from rate limits.{" "}
+                <span className="font-medium text-foreground">
+                  Connect another account below to add headroom.
+                </span>
               </p>
             </div>
           ) : (
@@ -213,14 +226,15 @@ export default function OnboardingPage() {
           <div className="mt-4 flex justify-center">
             <LinkedInConnect
               proxyUrl="/api/myagentmail/linkedin"
-              onConnected={async ({ sessionId: newId }) => {
+              onConnected={async ({ sessionId: _newId }) => {
                 await fetch("/api/accounts/track", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ sessionId: newId }),
+                  body: JSON.stringify({ sessionId: _newId }),
                 }).catch(() => {});
                 await reloadSessions();
-                setSessionId(newId);
+                // Stay in auto-distribute mode after a connect — let the
+                // user opt into pinning explicitly via the dropdown.
                 toast.success("LinkedIn connected");
               }}
               onError={(err) => toast.error(err.message)}

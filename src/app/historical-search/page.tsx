@@ -41,8 +41,15 @@ type ResultRow = {
   postUrl: string;
   postExcerpt: string;
   postedAt: string | null;
-  author: { name: string; profileUrl: string; headline: string | null };
+  author: {
+    name: string;
+    profileUrl: string;
+    headline: string | null;
+    role: string | null;
+    company: string | null;
+  };
   classification: { engage: boolean; intent: Intent; reason: string };
+  triageScore: number | null;
   rank: number;
 };
 
@@ -78,9 +85,9 @@ export default function HistoricalSearchPage() {
         setError(null);
         setHistory(d.searches || []);
         setSessions(d.sessions || []);
-        if (!sessionId && d.sessions?.[0]) setSessionId(d.sessions[0].id);
+        // Default = "" = auto-distribute. User opts into pinning via the dropdown.
       });
-  }, [sessionId]);
+  }, []);
 
   React.useEffect(() => {
     reload();
@@ -88,7 +95,7 @@ export default function HistoricalSearchPage() {
   }, []);
 
   async function runSearch() {
-    if (!sessionId || !query.trim()) return;
+    if (!query.trim() || !intentDescription.trim()) return;
     setBusy(true);
     setResults(null);
     setTookMs(null);
@@ -96,7 +103,7 @@ export default function HistoricalSearchPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sessionId,
+        sessionId: sessionId || null,
         query: query.trim(),
         lookback,
         minIntent: minIntent === "any" ? undefined : minIntent,
@@ -175,15 +182,17 @@ export default function HistoricalSearchPage() {
             <Label>LinkedIn account</Label>
             <select
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-              value={sessionId}
-              onChange={(e) => setSessionId(e.target.value)}
+              value={sessionId || "__auto__"}
+              onChange={(e) =>
+                setSessionId(e.target.value === "__auto__" ? "" : e.target.value)
+              }
             >
-              <option value="" disabled>
-                Pick an account
+              <option value="__auto__">
+                Auto-distribute (recommended)
               </option>
               {sessions.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.label || s.id.slice(0, 8)}
+                  Pin to: {s.label || s.id.slice(0, 8)}
                 </option>
               ))}
             </select>
@@ -236,7 +245,7 @@ export default function HistoricalSearchPage() {
           </p>
           <Button
             onClick={runSearch}
-            disabled={busy || !query.trim() || !sessionId || !intentDescription.trim()}
+            disabled={busy || !query.trim() || !intentDescription.trim() || sessions.length === 0}
           >
             <SearchIcon className="h-4 w-4" />
             {busy ? "Searching…" : "Run search"}
@@ -279,6 +288,11 @@ export default function HistoricalSearchPage() {
                   <tr key={r.postUrl} className="border-b last:border-b-0 align-top">
                     <td className="px-4 py-3">
                       <div className="font-medium">{r.author.name || "—"}</div>
+                      {r.author.role || r.author.company ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          {[r.author.role, r.author.company].filter(Boolean).join(" · ")}
+                        </div>
+                      ) : null}
                       {r.author.profileUrl ? (
                         <a
                           href={r.author.profileUrl}

@@ -356,3 +356,29 @@ export async function getHistoricalSearch(
     `/linkedin/searches/${id}`,
   );
 }
+
+// ── Per-session quota utilization ────────────────────────────────────────
+// Drives the dashboard panel that shows customers what their connected
+// accounts have used in the trailing 24h and where they have headroom.
+
+export type SessionUtilization = {
+  sessionId: string;
+  label: string | null;
+  status: string;
+  rateLimitedUntil: string | null;
+  rateLimitReason: string | null;
+  counts: Record<string, number>;
+  remaining: Record<string, number>;
+};
+
+export async function getSessionUtilization(): Promise<{
+  budget: Record<string, number>;
+  sessions: SessionUtilization[];
+}> {
+  const r = await request<{
+    ok: boolean;
+    budget: Record<string, number>;
+    sessions: SessionUtilization[];
+  }>("GET", "/linkedin/sessions/utilization");
+  return { budget: r.budget || {}, sessions: r.sessions || [] };
+}
