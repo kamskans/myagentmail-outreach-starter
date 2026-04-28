@@ -21,7 +21,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LinkedInConnect } from "@myagentmail/react";
 
-type Step = "website" | "linkedin" | "icp" | "detect" | "objectives" | "launch";
+type Step = "keys" | "website" | "linkedin" | "icp" | "detect" | "objectives" | "launch";
+
+type KeyStatus = {
+  myagentmail: { set: boolean; placeholder: boolean };
+  openai: { set: boolean; placeholder: boolean };
+  webhookSecret: { set: boolean };
+};
 
 type Inferred = {
   companyName: string;
@@ -51,7 +57,12 @@ const COMPANY_TYPE_OPTIONS = ["Startup", "Private Company", "Public Company", "A
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const [step, setStep] = React.useState<Step>("website");
+  const [step, setStep] = React.useState<Step>("keys");
+  const [keyStatus, setKeyStatus] = React.useState<KeyStatus | null>(null);
+  const [mamKey, setMamKey] = React.useState("");
+  const [openaiKey, setOpenaiKey] = React.useState("");
+  const [savingKeys, setSavingKeys] = React.useState(false);
+  const [keysJustSaved, setKeysJustSaved] = React.useState(false);
   const [websiteUrl, setWebsiteUrl] = React.useState("");
   const [inferring, setInferring] = React.useState(false);
   const [inferred, setInferred] = React.useState<Inferred | null>(null);
@@ -63,6 +74,52 @@ export default function OnboardingPage() {
   const [precision, setPrecision] = React.useState<"discovery" | "high">("high");
   const [watchlistText, setWatchlistText] = React.useState("");
   const [launching, setLaunching] = React.useState(false);
+
+  // Step 0: poll key status. If both keys are configured, skip
+  // straight to step 1.
+  React.useEffect(() => {
+    fetch("/api/agent/keys")
+      .then((r) => r.json())
+      .then((data) => {
+        setKeyStatus(data?.status ?? null);
+        if (data?.status?.myagentmail?.set && data?.status?.openai?.set) {
+          setStep("website");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveKeys() {
+    if (!mamKey && !openaiKey) {
+      toast.error("Enter at least one key");
+      return;
+    }
+    setSavingKeys(true);
+    try {
+      const r = await fetch("/api/agent/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          myagentmailApiKey: mamKey || undefined,
+          openaiApiKey: openaiKey || undefined,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "save failed");
+      setKeyStatus(data.status);
+      setKeysJustSaved(true);
+      const bothSet = data.status?.myagentmail?.set && data.status?.openai?.set;
+      if (bothSet) {
+        toast.success("Keys saved. Restart the dev server, then continue.");
+      } else {
+        toast.success("Saved.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to save keys");
+    } finally {
+      setSavingKeys(false);
+    }
+  }
 
   React.useEffect(() => {
     fetch("/api/agent/config")
@@ -179,6 +236,101 @@ export default function OnboardingPage() {
       </div>
 
       <ProgressDots step={step} />
+
+      {step === "keys" && (
+        <Card className="space-y-4 p-6">
+          <div>
+            <h2 className="text-xl font-semibold">Configure your API keys</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The starter needs two keys to work: your MyAgentMail key (LinkedIn polling +
+              email send) and your OpenAI key (the AI drafters). We&apos;ll write them to
+              <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-xs">.env</code>
+              for you. Both stay on your machine.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="mam-key">
+              MyAgentMail API key{" "}
+              {keyStatus?.myagentmail.set ? (
+                <span className="text-emerald-600">✓ configured</span>
+              ) : keyStatus?.myagentmail.placeholder ? (
+                <span className="text-amber-700">(still placeholder)</span>
+              ) : null}
+            </Label>
+            <p className="mb-1 text-[11px] text-muted-foreground">
+              Get yours at{" "}
+              <a
+                href="https://myagentmail.com/dashboard/api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                myagentmail.com/dashboard/api-keys
+              </a>
+              . Format: <code className="rounded bg-muted px-1 text-xs">tk_...</code>
+            </p>
+            <Input
+              id="mam-key"
+              type="password"
+              placeholder="tk_..."
+              value={mamKey}
+              onChange={(e) => setMamKey(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="openai-key">
+              OpenAI API key{" "}
+              {keyStatus?.openai.set ? (
+                <span className="text-emerald-600">✓ configured</span>
+              ) : keyStatus?.openai.placeholder ? (
+                <span className="text-amber-700">(still placeholder)</span>
+              ) : null}
+            </Label>
+            <p className="mb-1 text-[11px] text-muted-foreground">
+              Get yours at{" "}
+              <a
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                platform.openai.com/api-keys
+              </a>
+              . Used for ICP inference + drafters. Pennies/day at typical volume.
+            </p>
+            <Input
+              id="openai-key"
+              type="password"
+              placeholder="sk-..."
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+            />
+          </div>
+          <Button onClick={saveKeys} disabled={savingKeys}>
+            {savingKeys ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Save keys
+          </Button>
+          {keysJustSaved ? (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-800">
+              Keys written to <code className="rounded bg-muted px-1">.env</code>. Restart the
+              dev server (<code className="rounded bg-muted px-1">npm run dev</code>) so Next.js
+              picks them up, then come back and continue.
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between border-t pt-4">
+            <span className="text-xs text-muted-foreground">
+              Already configured? Skip ahead.
+            </span>
+            <Button
+              variant="outline"
+              onClick={() => setStep("website")}
+              disabled={!keyStatus?.myagentmail.set || !keyStatus?.openai.set}
+            >
+              Continue <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {step === "website" && (
         <Card className="space-y-4 p-6">
@@ -482,7 +634,7 @@ export default function OnboardingPage() {
 }
 
 function ProgressDots({ step }: { step: Step }) {
-  const order: Step[] = ["website", "linkedin", "icp", "detect", "objectives", "launch"];
+  const order: Step[] = ["keys", "website", "linkedin", "icp", "detect", "objectives", "launch"];
   const idx = order.indexOf(step);
   return (
     <div className="flex justify-center gap-1.5">

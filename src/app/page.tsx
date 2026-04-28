@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 type Status = {
+  keysConfigured: boolean;
   hasAgent: boolean;
   agentLaunchedAt: string | null;
   signalCount: number;
@@ -34,14 +35,17 @@ export default function Overview() {
 
   React.useEffect(() => {
     Promise.all([
+      fetch("/api/agent/keys").then((r) => r.json()),
       fetch("/api/agent/config").then((r) => r.json()),
       fetch("/api/accounts").then((r) => r.ok ? r.json() : { accounts: [] }),
       fetch("/api/inboxes").then((r) => r.ok ? r.json() : { inboxes: [] }),
       fetch("/api/leads/list").then((r) => r.json()),
-    ]).then(([cfg, acc, ib, ld]) => {
+    ]).then(([keys, cfg, acc, ib, ld]) => {
       const cfgRow = cfg?.config ?? {};
       const leads = (ld?.leads ?? []) as Array<{ status: string }>;
       setS({
+        keysConfigured:
+          !!keys?.status?.myagentmail?.set && !!keys?.status?.openai?.set,
         hasAgent: !!cfgRow.launchedAt,
         agentLaunchedAt: cfgRow.launchedAt ?? null,
         signalCount: (cfgRow.createdSignalIds ?? []).length,
@@ -70,7 +74,25 @@ export default function Overview() {
         </p>
       </div>
 
-      {!s.hasAgent ? (
+      {!s.keysConfigured ? (
+        <Card className="space-y-4 border-amber-500/30 bg-amber-500/5 p-6">
+          <div className="flex items-center gap-3">
+            <Sparkles className="h-6 w-6 text-amber-700" />
+            <div>
+              <h2 className="font-semibold">Configure your API keys to get started</h2>
+              <p className="text-sm text-muted-foreground">
+                The starter needs your MyAgentMail key + OpenAI key. We&apos;ll guide you through
+                in step 1 of onboarding.
+              </p>
+            </div>
+          </div>
+          <Button asChild>
+            <Link href="/onboarding">
+              Start setup <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </Card>
+      ) : !s.hasAgent ? (
         <Card className="space-y-4 border-primary/30 bg-primary/5 p-6">
           <div className="flex items-center gap-3">
             <Sparkles className="h-6 w-6 text-primary" />

@@ -51,6 +51,17 @@ function webhookUrlFromHost(req: Request): string | undefined {
 }
 
 export async function POST(req: Request) {
+  const mamKey = (process.env.MYAGENTMAIL_API_KEY || "").trim();
+  if (!mamKey || /^tk_your_key_here$/.test(mamKey)) {
+    return NextResponse.json(
+      {
+        error:
+          "MYAGENTMAIL_API_KEY is not set. Go back to step 1 of onboarding to configure it, then restart npm run dev.",
+      },
+      { status: 400 },
+    );
+  }
+
   const cfg = getAgentConfig();
   if (!cfg.websiteUrl || !cfg.productPitch) {
     return NextResponse.json(
