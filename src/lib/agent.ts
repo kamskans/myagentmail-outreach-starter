@@ -48,7 +48,7 @@ const IcpInference = z.object({
     .array(z.string())
     .max(6)
     .describe(
-      "Specific phrases people would post on LinkedIn when expressing the pain this product solves. Quoted phrases work best.",
+      "SHORT keyword phrases (2-4 words MAX) people commonly use on LinkedIn when posting about this pain or topic. NOT full-sentence quotes — those have near-zero match rate on LinkedIn's content search. Think head-of-funnel vocabulary the niche actually types. Examples: 'editing burnout', 'video repurposing', 'creator workflow', 'cold outbound'. NEVER generate sentences like \"I'm drowning in editing\" or \"need a tool that can help me\" — those don't match real posts.",
     ),
   trackCompanies: z
     .array(z.string())
@@ -95,8 +95,20 @@ export async function inferIcpFromWebsite(websiteUrl: string): Promise<InferredI
   const { object } = await generateObject({
     model: openai(MODEL_ID),
     schema: IcpInference,
-    system:
-      "You are a senior B2B GTM strategist setting up an outbound campaign. Given a company's website, infer their ideal customer profile and the specific intent signals worth monitoring on LinkedIn. Be specific. Avoid generic answers like 'all SaaS companies' or 'all founders'. Quote real phrases people in the ICP would actually post.",
+    system: [
+      "You are a senior B2B GTM strategist setting up an outbound campaign on LinkedIn. Given a company's website, infer their ideal customer profile and the specific intent signals worth monitoring.",
+      "",
+      "Be specific. Avoid generic answers like 'all SaaS companies' or 'all founders'.",
+      "",
+      "CRITICAL — trackKeywords:",
+      "These are fed into LinkedIn's content search, which does fuzzy matching but only with reasonable recall on SHORT phrases (2-4 words). Long sentences match almost nothing because nobody writes those exact words.",
+      "GOOD: 'editing burnout', 'cold outbound', 'video repurposing', 'creator workflow', 'series A founder' — short, recurring vocabulary in the niche.",
+      "BAD: 'I'm drowning in editing—any tool that can help me?', 'My content pipeline breaks when clients want fast turnaround', 'Looking for an AI editor that can reduce turnaround time' — these are LLM-fluent sentences, not what people actually post. Match rate is near zero.",
+      "Generate 3-6 short keywords. Mix nouns ('editing burnout') with present-tense verbs ('hiring a VA').",
+      "",
+      "For trackCompanies, name actual competitors with real LinkedIn /company/ URLs.",
+      "For trackProfiles, name niche creators / influencers with real LinkedIn /in/ URLs whose audience is the ICP.",
+    ].join("\n"),
     prompt: `Website: ${websiteUrl}
 
 Site content (truncated):
