@@ -21,7 +21,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LinkedInConnect } from "@myagentmail/react";
 
-type Step = "keys" | "website" | "linkedin" | "icp" | "detect" | "objectives" | "launch";
+type Step =
+  | "keys"
+  | "already_launched"
+  | "website"
+  | "linkedin"
+  | "icp"
+  | "detect"
+  | "objectives"
+  | "launch";
 
 type KeyStatus = {
   myagentmail: { set: boolean; placeholder: boolean };
@@ -124,6 +132,14 @@ export default function OnboardingPage() {
     }
   }
 
+  // Track whether the agent is already launched + how many signals it
+  // owns. Drives the "already_launched" landing card so revisiting
+  // /onboarding after launch doesn't dump the user back at step 1.
+  const [agentLaunched, setAgentLaunched] = React.useState<{
+    launchedAt: string;
+    signalCount: number;
+  } | null>(null);
+
   React.useEffect(() => {
     fetch("/api/agent/config")
       .then((r) => r.json())
@@ -149,6 +165,15 @@ export default function OnboardingPage() {
           setMessageTone(cfg.messageTone ?? "professional");
           setPrecision(cfg.precision ?? "high");
           setWatchlistText((cfg.watchlistProfiles ?? []).join("\n"));
+        }
+        if (cfg?.launchedAt) {
+          setAgentLaunched({
+            launchedAt: cfg.launchedAt,
+            signalCount: (cfg.createdSignalIds ?? []).length,
+          });
+          // Override the keys-step auto-skip — if the agent is
+          // already running we don't want to drop the user mid-wizard.
+          setStep("already_launched");
         }
       })
       .catch(() => {});
@@ -361,6 +386,88 @@ export default function OnboardingPage() {
               disabled={!keyStatus?.myagentmail.set || !keyStatus?.openai.set}
             >
               Continue <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {step === "already_launched" && agentLaunched && (
+        <Card className="space-y-5 p-6">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold">Your agent is live</h2>
+              <p className="text-sm text-muted-foreground">
+                Launched {new Date(agentLaunched.launchedAt).toLocaleDateString()} ·{" "}
+                {agentLaunched.signalCount} signal{agentLaunched.signalCount === 1 ? "" : "s"}{" "}
+                running on a daily cadence.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <a
+              href="/leads"
+              className="flex items-center justify-between rounded-md border bg-background p-4 transition-colors hover:bg-muted/40"
+            >
+              <div>
+                <div className="text-sm font-medium">Review leads</div>
+                <div className="text-xs text-muted-foreground">
+                  See what your agent has surfaced
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </a>
+            <a
+              href="/inboxes"
+              className="flex items-center justify-between rounded-md border bg-background p-4 transition-colors hover:bg-muted/40"
+            >
+              <div>
+                <div className="text-sm font-medium">Manage inboxes</div>
+                <div className="text-xs text-muted-foreground">
+                  Provision sender addresses
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </a>
+            <a
+              href="/accounts"
+              className="flex items-center justify-between rounded-md border bg-background p-4 transition-colors hover:bg-muted/40"
+            >
+              <div>
+                <div className="text-sm font-medium">LinkedIn accounts</div>
+                <div className="text-xs text-muted-foreground">
+                  Add accounts to scale polling
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </a>
+            <a
+              href="/domains"
+              className="flex items-center justify-between rounded-md border bg-background p-4 transition-colors hover:bg-muted/40"
+            >
+              <div>
+                <div className="text-sm font-medium">Custom domains</div>
+                <div className="text-xs text-muted-foreground">
+                  Bring your own sending domain
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </a>
+          </div>
+          <div className="flex items-center justify-between border-t pt-4">
+            <span className="text-xs text-muted-foreground">
+              Need to retune the firing rule, ICP, or tracked actors?
+            </span>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAgentLaunched(null);
+                setStep("icp");
+              }}
+            >
+              Edit configuration
             </Button>
           </div>
         </Card>
