@@ -54,7 +54,7 @@ MYAGENTMAIL_WEBHOOK_URL=https://your-ngrok.io/api/webhook
 # Optional: set this AFTER first signal creation to verify webhook signatures
 MYAGENTMAIL_WEBHOOK_SECRET=whsec_...
 # Optional: tweak the model
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4.1-mini-2025-04-14
 ```
 
 ## The flow
@@ -105,7 +105,7 @@ The queue auto-refreshes every 5 seconds, so a freshly launched agent shows lead
 
 ## Customizing
 
-- **Different LLM**: swap `gpt-4o-mini` via `OPENAI_MODEL=gpt-4o`. Or replace the `@ai-sdk/openai` import in `lib/agent.ts` with `@ai-sdk/anthropic` etc — Vercel AI SDK keeps the call signature identical.
+- **Different LLM**: swap the default `gpt-4.1-mini-2025-04-14` via `OPENAI_MODEL=gpt-4.1` (or `gpt-5`, etc.). Or replace the `@ai-sdk/openai` import in `lib/agent.ts` with `@ai-sdk/anthropic` etc — Vercel AI SDK keeps the call signature identical.
 - **Different voice**: edit the system prompts in `lib/agent.ts`. Specifically `draftLinkedInMessage` and `draftColdEmail`.
 - **Different ICP fields**: extend `IcpInference` schema in `lib/agent.ts` and the matching `agent_config` columns in `lib/db.ts`.
 - **More signal kinds**: each "track keywords / track companies / track profiles / watchlist" surface in onboarding maps to one signal-creation call in `/api/agent/launch`. Add a fifth list, add a fifth call.
