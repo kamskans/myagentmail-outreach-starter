@@ -22,7 +22,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
 
-const MODEL_ID = process.env.OPENAI_MODEL || "gpt-4.1-mini-2025-04-14";
+const MODEL_ID = process.env.OPENAI_MODEL || "gpt-5.4-nano-2026-03-17";
 
 /* ── ICP inference from website URL ──────────────────────────────────── */
 
