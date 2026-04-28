@@ -295,6 +295,11 @@ function NewSignalForm({
           <p className="mt-1 text-[11px] text-muted-foreground">
             Plain English. The classifier uses this as the authoritative definition of what should fire — the keyword is just a coarse pre-filter.
           </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            <strong>For engagement &amp; watchlist signals:</strong> the rule must include BOTH
+            inclusion criteria (who you want) AND exclusion criteria (what to skip).
+            Vague rules like &quot;All&quot; will fire zero matches because the LLM has nothing to select for or against.
+          </p>
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field id="session" label="LinkedIn account">

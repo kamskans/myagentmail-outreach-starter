@@ -29,15 +29,20 @@ import { fmtDate } from "@/lib/utils";
 type Cadence = "daily" | "every_12h" | "every_6h" | "manual";
 type Intent = "low" | "medium" | "high";
 
+type SignalKind = "keyword" | "engagement" | "job_change_watchlist";
+
 type ManagedSignal = {
   id: string;
+  kind?: SignalKind;
   name: string;
-  query: string;
+  query: string | null;
   sessionId: string;
   cadence: Cadence;
   webhookUrl: string | null;
   filterMinIntent: Intent;
   intentDescription: string;
+  target?: { kind: "profile" | "company"; url: string; label: string | null } | null;
+  watchlistCount?: number | null;
   enabled: boolean;
   lastPolledAt: string | null;
   nextPollAt: string | null;
@@ -67,7 +72,10 @@ type Match = {
 type RunResult = {
   ok: boolean;
   fetched: number;
+  triagePassed?: number;
+  enriched?: number;
   newMatches: number;
+  pendingEnrichment?: number;
   webhooksQueued: number;
   errorCode?: string;
   errorMessage?: string;
@@ -79,6 +87,48 @@ const CADENCE_LABELS: Record<Cadence, string> = {
   every_6h: "Every 6 hours",
   manual: "Manual only",
 };
+
+/**
+ * Run-completion headline. The keyword and engagement runners both
+ * report `fetched` but mean different things by it: keyword = posts
+ * matching the search term, engagement = the tracked actor's recent
+ * posts whose engagers we just evaluated. Watchlist polls profiles,
+ * not posts. Generic copy was misleading on the latter two.
+ */
+function runHeadline(kind: SignalKind | undefined, r: RunResult): string {
+  if (kind === "engagement") {
+    const triage = r.triagePassed ?? 0;
+    return `Run complete — checked engagers across ${r.fetched} post(s); ${triage} passed triage`;
+  }
+  if (kind === "job_change_watchlist") {
+    return `Run complete — polled ${r.fetched} watchlist profile(s) for role/company changes`;
+  }
+  return `Run complete — fetched ${r.fetched} post(s) in the past 24h`;
+}
+
+/**
+ * Empty-result message. Engagement signals get a different hint
+ * because the most common cause of zero matches is a firing rule
+ * that's too vague (especially "All") rather than a real "no new
+ * activity" — the LLM classifier needs both inclusion and exclusion
+ * criteria to fire reliably on engagers.
+ */
+function runEmptyMessage(kind: SignalKind | undefined, r: RunResult): string {
+  if (kind === "engagement") {
+    if (r.fetched === 0) {
+      return "No new posts from this actor since the last poll.";
+    }
+    const triage = r.triagePassed ?? 0;
+    if (triage === 0) {
+      return "Engagers were found, but none passed triage against your firing rule. If you set the rule to \"All\" or kept it very generic, the LLM has nothing to select for — try describing who you want (e.g. \"VP RevOps at Series A–C SaaS\") AND what to skip.";
+    }
+    return "Engagers passed triage but none survived classification against the firing rule. Tighten the inclusion criteria, or check filterMinIntent (currently set on this signal).";
+  }
+  if (kind === "job_change_watchlist") {
+    return "No role/company changes detected on this poll. Watchlist signals only fire on actual job moves.";
+  }
+  return "Nothing new — every post we saw was already on file or didn't pass the firing rule.";
+}
 
 export default function SignalDetailPage() {
   const params = useParams<{ id: string }>();
@@ -226,12 +276,12 @@ export default function SignalDetailPage() {
               {lastRun.ok ? (
                 <>
                   <p className="font-medium">
-                    Run complete — fetched {lastRun.fetched} post(s) in the past 24h
+                    {runHeadline(signal?.kind, lastRun)}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {lastRun.newMatches > 0
                       ? `${lastRun.newMatches} new match(es) added below.${lastRun.webhooksQueued > 0 ? ` ${lastRun.webhooksQueued} webhook(s) queued.` : ""}`
-                      : "Nothing new — every post we saw was already on file or didn't pass the firing rule."}
+                      : runEmptyMessage(signal?.kind, lastRun)}
                   </p>
                 </>
               ) : (
@@ -256,9 +306,31 @@ export default function SignalDetailPage() {
             Configuration
           </summary>
           <div className="space-y-3 p-4 text-sm">
-            <Row label="Keyword">
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{signal.query}</code>
+            <Row label="Kind">
+              {signal.kind === "engagement"
+                ? "Engagement (post engagers)"
+                : signal.kind === "job_change_watchlist"
+                ? "Watchlist (job changes)"
+                : "Keyword"}
             </Row>
+            {signal.kind === "engagement" && signal.target ? (
+              <Row label={signal.target.kind === "company" ? "Company" : "Profile"}>
+                <a
+                  href={signal.target.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline"
+                >
+                  {signal.target.label || signal.target.url}
+                </a>
+              </Row>
+            ) : signal.kind === "job_change_watchlist" ? (
+              <Row label="Profiles">{signal.watchlistCount ?? 0} on the watchlist</Row>
+            ) : (
+              <Row label="Keyword">
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{signal.query}</code>
+              </Row>
+            )}
             <Row label="Cadence">{CADENCE_LABELS[signal.cadence]}</Row>
             <Row label="Webhook filter">≥ {signal.filterMinIntent} intent</Row>
             <Row label="Webhook URL">
@@ -274,6 +346,21 @@ export default function SignalDetailPage() {
                 Firing rule
               </p>
               <p className="mt-1 whitespace-pre-wrap text-xs">{signal.intentDescription}</p>
+              {signal.kind === "engagement" &&
+              (!signal.intentDescription ||
+                signal.intentDescription.trim().toLowerCase() === "all" ||
+                signal.intentDescription.trim().length < 40) ? (
+                <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-amber-800 dark:text-amber-200">
+                  <strong>Heads up:</strong> engagement signals need a firing rule with
+                  BOTH inclusion (who you want) AND exclusion (what to skip) criteria.
+                  Generic rules like &quot;All&quot; or one-line descriptions usually
+                  fire zero matches because the classifier has no signal to select for or
+                  against. Try: <em>&quot;Flag engagers who appear to be VP-level or
+                  director-level operators at Series A–C SaaS companies. Skip
+                  Cognizant employees, recruiters, and accounts that obviously sell
+                  outbound tools.&quot;</em>
+                </div>
+              ) : null}
             </div>
           </div>
         </details>
