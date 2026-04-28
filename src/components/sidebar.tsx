@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Linkedin, Inbox, Users, Sparkles } from "lucide-react";
+import { LayoutGrid, Linkedin, Inbox, Users, Sparkles, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/accounts", label: "LinkedIn accounts", icon: Linkedin },
   { href: "/inboxes", label: "Inboxes", icon: Inbox },
+  { href: "/domains", label: "Domains", icon: Globe },
 ];
 
 export function Sidebar() {

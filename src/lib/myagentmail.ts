@@ -64,8 +64,13 @@ export async function listInboxes(): Promise<Inbox[]> {
 export async function createInbox(input: {
   username?: string;
   displayName?: string;
+  domain?: string;
 }): Promise<Inbox> {
   return await request<Inbox>("POST", "/inboxes", input);
+}
+
+export async function deleteInbox(inboxId: string): Promise<void> {
+  await request("DELETE", `/inboxes/${inboxId}`);
 }
 
 export async function ensureInbox(username: string): Promise<Inbox> {
@@ -77,6 +82,65 @@ export async function ensureInbox(username: string): Promise<Inbox> {
 
 export async function getInbox(inboxId: string): Promise<Inbox> {
   return await request<Inbox>("GET", `/inboxes/${inboxId}`);
+}
+
+// ── Custom domains ─────────────────────────────────────────────────────
+// MyAgentMail provisions both outbound (SES) + inbound (Stalwart) when
+// you add a domain. POST /v1/domains gives back the DNS records the
+// customer must add to their registrar; verification is a follow-up
+// GET. Once verified, the domain is selectable when provisioning new
+// inboxes (POST /v1/inboxes { username, domain }).
+
+export type DomainStatus =
+  | "pending"  // DNS records not yet detected
+  | "verifying"
+  | "verified"
+  | "failed"
+  | "unknown";
+
+export type DomainDnsRecord = {
+  type: "TXT" | "MX" | "CNAME" | "DKIM";
+  host: string;
+  value: string;
+  priority?: number;
+};
+
+export type CustomDomain = {
+  domain: string;
+  status: DomainStatus;
+  inboundEnabled: boolean;
+  outboundEnabled: boolean;
+  isDefault?: boolean;
+  createdAt: string;
+  verifiedAt: string | null;
+  records?: DomainDnsRecord[];
+};
+
+export async function listDomains(): Promise<CustomDomain[]> {
+  const r = await request<{ domains: CustomDomain[] }>("GET", "/domains");
+  return r.domains || [];
+}
+
+export async function createDomain(domain: string): Promise<CustomDomain> {
+  const r = await request<{ domain: CustomDomain }>("POST", "/domains", { domain });
+  return r.domain;
+}
+
+export async function getDomain(domain: string): Promise<CustomDomain> {
+  const r = await request<{ domain: CustomDomain }>("GET", `/domains/${encodeURIComponent(domain)}`);
+  return r.domain;
+}
+
+export async function verifyDomain(domain: string): Promise<CustomDomain> {
+  const r = await request<{ domain: CustomDomain }>(
+    "GET",
+    `/domains/${encodeURIComponent(domain)}/verify`,
+  );
+  return r.domain;
+}
+
+export async function deleteDomain(domain: string): Promise<void> {
+  await request("DELETE", `/domains/${encodeURIComponent(domain)}`);
 }
 
 // ── Messages (inbox mail) ──────────────────────────────────────────────
