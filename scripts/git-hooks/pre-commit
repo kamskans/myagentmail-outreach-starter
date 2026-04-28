@@ -51,10 +51,14 @@ PATTERNS=(
   '-----BEGIN[A-Z ]+PRIVATE KEY-----'
 )
 
-# Patterns that are explicitly ALLOWED (placeholders, examples, redactions).
-# Tested AFTER pattern match — if the matching line contains any of these,
-# it's treated as a placeholder and not flagged.
-ALLOWLIST_REGEX='(your_key_here|your-api-key|YOUR_API_KEY|YOUR_KEY|<your[ _-]|placeholder|REDACTED|REDACT|EXAMPLE|example|tk_your|sk_test_REPLACE|whsec_\.\.\.|re_\.\.\.|sk-\.\.\.|change[-_ ]?me|REPLACE_WITH|XXXXXXXX|CHANGEME)'
+# Patterns the MATCHED credential string itself must contain to be
+# treated as a placeholder. Tested against the captured value — NOT
+# the surrounding line — so `example: "tk_real_key…"` correctly fails
+# (the value `tk_real_key…` has no placeholder markers in it) while
+# `example: "tk_your_key_here"` correctly passes (the value contains
+# `your`). Real LinkedIn / Stripe / etc. keys are pure base64-ish and
+# never contain English words like these.
+ALLOWLIST_REGEX='([Yy]our|YOUR|placeholder|PLACEHOLDER|REDACT|redact|[Cc]hange|CHANGE|REPLACE|replace|XXXX|xxxx|[Dd]ummy|DUMMY|[Ff]ake|FAKE|TODO|todo|EXAMPLE|example|DO_NOT_USE|do_not_use|sample|SAMPLE)'
 
 red() { printf '\033[31m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
@@ -90,8 +94,15 @@ while IFS= read -r f; do
   for pat in "${PATTERNS[@]}"; do
     while IFS= read -r match_line; do
       [[ -z "$match_line" ]] && continue
-      if [[ "$match_line" =~ $ALLOWLIST_REGEX ]]; then continue; fi
-      # match_line is "lineno:content"
+      # match_line is "lineno:fullline" — extract just the matching
+      # credential value and check that against the allowlist (so
+      # surrounding context like `example:` doesn't whitelist a real
+      # key).
+      lineno="${match_line%%:*}"
+      fullline="${match_line#*:}"
+      matched_value=$(printf '%s' "$fullline" | grep -oE -e "$pat" | head -1)
+      if [[ -z "$matched_value" ]]; then continue; fi
+      if [[ "$matched_value" =~ $ALLOWLIST_REGEX ]]; then continue; fi
       printf '%s:%s\n' "$f" "$match_line" >> "$HITS_FILE"
       HIT_COUNT=$((HIT_COUNT+1))
     done < <(printf '%s\n' "$blob" | grep -nE -e "$pat" || true)
