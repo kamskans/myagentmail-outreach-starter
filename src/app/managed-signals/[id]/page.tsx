@@ -71,6 +71,7 @@ type Match = {
 
 type RunResult = {
   ok: boolean;
+  signalKind?: SignalKind;
   fetched: number;
   triagePassed?: number;
   enriched?: number;
@@ -276,12 +277,12 @@ export default function SignalDetailPage() {
               {lastRun.ok ? (
                 <>
                   <p className="font-medium">
-                    {runHeadline(signal?.kind, lastRun)}
+                    {runHeadline(lastRun.signalKind ?? signal?.kind, lastRun)}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {lastRun.newMatches > 0
                       ? `${lastRun.newMatches} new match(es) added below.${lastRun.webhooksQueued > 0 ? ` ${lastRun.webhooksQueued} webhook(s) queued.` : ""}`
-                      : runEmptyMessage(signal?.kind, lastRun)}
+                      : runEmptyMessage(lastRun.signalKind ?? signal?.kind, lastRun)}
                   </p>
                 </>
               ) : (
