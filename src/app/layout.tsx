@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { Toaster } from "sonner";
 import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
+// The LinkedInConnect widget ships its own styles. Without this import
+// the widget renders as plain unstyled text on /onboarding step 2 and
+// /accounts.
+import "@myagentmail/react/styles.css";
 
 export const metadata: Metadata = {
   title: "Outreach Starter — MyAgentMail",
