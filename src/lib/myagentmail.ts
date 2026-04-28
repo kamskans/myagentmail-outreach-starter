@@ -374,6 +374,47 @@ export async function createManagedSignal(input: {
   return r.signal;
 }
 
+export async function createEngagementSignal(input: {
+  name: string;
+  target: { kind: "profile" | "company"; url: string; label?: string };
+  intentDescription: string;
+  webhookUrl?: string;
+  filterMinIntent?: SignalIntent;
+  sessionId?: string | null;
+  cadence?: SignalCadence;
+}): Promise<ManagedSignal> {
+  const r = await request<{ signal: ManagedSignal }>("POST", "/linkedin/signals", {
+    kind: "engagement",
+    ...input,
+  });
+  return r.signal;
+}
+
+export async function createWatchlistSignal(input: {
+  name: string;
+  profileUrls: string[];
+  intentDescription: string;
+  webhookUrl?: string;
+  filterMinIntent?: SignalIntent;
+  sessionId?: string | null;
+}): Promise<ManagedSignal> {
+  const { profileUrls, ...rest } = input;
+  const r = await request<{ signal: ManagedSignal }>("POST", "/linkedin/signals", {
+    kind: "job_change_watchlist",
+    ...rest,
+    watchlist: profileUrls.map((u) => ({ profileUrl: u })),
+  });
+  return r.signal;
+}
+
+export async function sendLinkedInConnect(input: {
+  target: string;
+  message?: string;
+  sessionId?: string | null;
+}): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+  return await request("POST", "/linkedin/connections", input);
+}
+
 export async function deleteManagedSignal(id: string): Promise<void> {
   await request("DELETE", `/linkedin/signals/${id}`);
 }

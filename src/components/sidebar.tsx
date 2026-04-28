@@ -2,19 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Linkedin, Inbox, Radar, Webhook, Search, Users, ListTodo, Settings, Sparkles } from "lucide-react";
+import { LayoutGrid, Linkedin, Inbox, Users, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutGrid },
-  { href: "/onboarding", label: "Set up an agent", icon: Sparkles },
+  { href: "/onboarding", label: "Set up agent", icon: Sparkles },
+  { href: "/leads", label: "Leads", icon: Users },
   { href: "/accounts", label: "LinkedIn accounts", icon: Linkedin },
   { href: "/inboxes", label: "Inboxes", icon: Inbox },
-  { href: "/managed-signals", label: "Intent signals", icon: Webhook },
-  { href: "/historical-search", label: "Search history", icon: Search },
-  { href: "/leads", label: "Leads", icon: Users },
-  { href: "/queue", label: "Approval queue", icon: ListTodo },
-  { href: "/setup", label: "Setup", icon: Settings },
 ];
 
 export function Sidebar() {

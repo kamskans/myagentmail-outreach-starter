@@ -1,408 +1,119 @@
-# MyAgentMail Outreach Starter
+# myagentmail-outreach-starter
 
-> Open-source contextual LinkedIn signal monitoring + email outreach, built on [MyAgentMail](https://myagentmail.com).
->
-> Define keywords your prospects post about. MyAgentMail watches LinkedIn for you, classifies each new match with an LLM, and webhooks high-intent posts to this app. The local agent drafts a personalized connection request, you click Approve, the message sends through your own MyAgentMail account.
+> Open-source AI lead agent for LinkedIn intent monitoring and cold-email outreach. Built on [MyAgentMail](https://myagentmail.com).
 
 ```
-   ┌──────────────────┐         ┌──────────────────────┐
-   │ Define keyword   │ ──────▶ │ MyAgentMail polls    │
-   │ at /managed-     │         │ LinkedIn server-side │
-   │ signals          │         │ + classifies w/ LLM  │
-   └──────────────────┘         └──────────┬───────────┘
-                                           │ webhook (HMAC-signed)
-                                           ▼
-   ┌──────────────────┐         ┌──────────────────────┐
-   │ Approval queue   │ ◀────── │ Local agent drafts   │
-   │ (you click       │         │ a personal note from │
-   │  Approve)        │         │ the post excerpt     │
-   └────────┬─────────┘         └──────────────────────┘
+   ┌──────────────┐    ┌──────────────────────┐    ┌──────────────────┐
+   │   Website    │───▶│   AI infers ICP +    │───▶│  Auto-creates    │
+   │     URL      │    │   intent signals     │    │  signals on MAM  │
+   └──────────────┘    └──────────────────────┘    └────────┬─────────┘
+                                                            │
+                                                            ▼
+   ┌──────────────────┐    ┌────────────────────┐   ┌───────────────────┐
+   │  /leads queue    │◀───│  Webhook fires     │◀──│  MAM polls daily  │
+   │  AI drafts copy  │    │  per match         │   │  classifies leads │
+   └────────┬─────────┘    └────────────────────┘   └───────────────────┘
             │
             ▼
-   ┌──────────────────┐
-   │ Send via your    │
-   │ MyAgentMail      │
-   │ account          │
-   └──────────────────┘
+   ┌──────────────────────────────────────┐
+   │  One click: send LinkedIn / email    │
+   └──────────────────────────────────────┘
 ```
 
-Polling, deduping, intent classification — all server-side on MyAgentMail. **You don't run cron. You don't pay an LLM bill for filtering. You don't manage LinkedIn rate limits.** You only handle the high-intent matches that actually deserve a personal note.
+## What you get when you're done
 
----
+A working AI lead agent that:
 
-## What you'll have when you're done
+- ✅ **Reads your website** and AI-infers your ICP (job titles, industries, company size, exclusion list, suggested keywords, suggested competitor pages, suggested influencer profiles)
+- ✅ **Auto-creates** keyword signals + engagement signals + a job-change watchlist on MyAgentMail
+- ✅ **Surfaces leads** to a unified `/leads` queue as the agent fires (one row per matched person, regardless of which signal kind triggered it)
+- ✅ **Drafts a personalized LinkedIn note** and a **cold email** for each lead, on demand, using the agent's voice config (pain points + tone + campaign goal)
+- ✅ **Sends with one click** — LinkedIn connection request via your real account, cold email via your provisioned MyAgentMail inbox
+- ✅ Survives in the same shape as v0.1 of the starter: ~3,500 lines of TypeScript you can fork
 
-Running locally on `http://localhost:3000`, you'll be able to:
+## Setup — 10 minutes
 
-- ✅ Search LinkedIn for keywords you care about (e.g. *"outbound is broken"*, *"hiring SDR"*)
-- ✅ Get only **high-intent** matches in your queue — generic posts, recruiter spam, and content marketers are filtered out automatically
-- ✅ See a personalized connection note pre-drafted for each match
-- ✅ Approve / edit / reject before anything sends
-- ✅ Send via your own MyAgentMail-connected LinkedIn account
-- ✅ Add a second LinkedIn account, a second signal, swap out the prompts — all in your fork
+| # | Step | Where |
+|---|------|-------|
+| 1 | Sign up at MyAgentMail | https://myagentmail.com |
+| 2 | Subscribe to the LinkedIn add-on | Dashboard → Billing |
+| 3 | Grab your master API key | Dashboard → API Keys |
+| 4 | Get an OpenAI key | platform.openai.com |
+| 5 | Clone + `npm install` | this repo |
+| 6 | Configure `.env` | (see below) |
+| 7 | `npm run dev` and visit `localhost:3000/onboarding` | the wizard takes over |
 
-This whole repo is **~3,000 lines of TypeScript**. Read it. Fork it. Customize the prompts. Add Twitter or HackerNews as additional signal sources.
-
----
-
-## Setup — 10 minutes, three accounts
-
-| # | Step | Where | Cost |
-|---|---|---|---|
-| 1 | **Sign up to MyAgentMail** | https://myagentmail.com/signup | 7-day free trial; card required, cancel anytime before trial ends |
-| 2 | **Subscribe to the LinkedIn add-on** | Dashboard → Billing | $29/mo (Solo) — required for signals |
-| 3 | **Get an OpenAI API key** *(for local message drafting only)* | https://platform.openai.com/api-keys | ~$0.01–0.05/day on `gpt-4o-mini` |
-| 4 | **Clone + configure this repo** | (commands below) | Free |
-| 5 | **Connect a LinkedIn account** | The starter app at `localhost:3000` | Free |
-| 6 | **Create your first signal** | Same app | Free |
-
-**What's bundled vs. what's yours.** Two LLM steps happen in this stack:
-
-| Step | Where it runs | Whose API key |
-|---|---|---|
-| **Classifying** matches (filtering noise, scoring intent) | MyAgentMail server-side via OpenRouter | Bundled — included with your LinkedIn add-on subscription |
-| **Drafting** the personalized connection message | Your local app (`src/lib/agent.ts`) | Your OpenAI key — you control the model and prompt |
-
-This split is intentional. Classification is a routine binary decision — easy to standardize. Drafting reflects *your* voice, *your* product, and *your* prompts — so it stays in your code where you can swap models, tune the system prompt, or replace it entirely with Anthropic, Mistral, a local Llama, or even a hand-curated template. We don't want to dictate your outreach voice.
-
-### Step 1 — Sign up to MyAgentMail
-
-Go to https://myagentmail.com/signup. 7-day free trial — a credit card is required to start the trial, but you can cancel anytime before day 7 and you won't be charged. After verifying your email and selecting a plan you'll land at https://myagentmail.com/dashboard.
-
-### Step 2 — Subscribe to the LinkedIn add-on
-
-The intent-signal feature is part of MyAgentMail's LinkedIn add-on. Without it, the `/v1/linkedin/*` endpoints return `402 LINKEDIN_NOT_SUBSCRIBED`.
-
-In the dashboard: **Billing → LinkedIn Outreach Add-on → Subscribe** (`$29/mo Solo` for one connected LinkedIn account is plenty for testing).
-
-What each tier gets you ([full pricing](https://myagentmail.com/linkedin#pricing)):
-
-| Tier | Connected accounts | Actions/day per account | Signals |
-|---|---|---|---|
-| Solo — $29/mo | 1 | 100 | 3 |
-| Team — $99/mo | 5 | 500 | 25 |
-| Agency — $299/mo | 25 | 2,000 | 100 |
-
-One **action** = one LinkedIn API call (a connection request, profile lookup, post search, or signal poll). Quota is enforced per LinkedIn account in a 24h sliding window — matching LinkedIn's own per-account rate limits.
-
-### Step 3 — Grab your MyAgentMail API key
-
-Dashboard → **API Keys**. Copy the `tk_…` master key. (You only need one — the same key authorizes inbox sends, LinkedIn endpoints, and signal management.)
-
-While you're there, bookmark:
-- **API reference** → https://myagentmail.com/docs (live OpenAPI spec, interactive)
-- **Raw OpenAPI** → https://myagentmail.com/openapi.yaml (paste into your AI tool of choice)
-- **Knowledge base** → https://myagentmail.com/kb (concepts, deliverability guides, recipes)
-- **Canonical recipe** → https://myagentmail.com/kb/example-lead-agent ("Build an AI lead agent in 6 API calls" — this starter's reference architecture in long-form)
-- **Blog** → https://myagentmail.com/blog (deeper context)
-
-**For AI-driven development** (Claude Code, Cursor, Windsurf, Cline):
-- **Agent skill** → https://myagentmail.com/skills/myagentmail/SKILL.md (drop into `~/.claude/skills/myagentmail/` so your assistant knows the full email + LinkedIn surface)
-- **LinkedIn deep-dive reference** → https://myagentmail.com/skills/myagentmail/references/linkedin.md (signals, searches, firing rules, multi-session routing)
-- **MCP server** → `npx -y myagentmail-mcp` ([package](https://www.npmjs.com/package/myagentmail-mcp)) — exposes 30+ tools to any MCP-compatible client
-- **TypeScript SDK** → `npm install myagentmail` ([package](https://www.npmjs.com/package/myagentmail)) — typed client if you want to extend this starter beyond the thin wrapper in `src/lib/myagentmail.ts`
-
-### Step 4 — Get an OpenAI key *(only for local drafting)*
-
-[Create one](https://platform.openai.com/api-keys) if you don't have one. The starter uses `gpt-4o-mini` by default to draft each connection note locally — at typical signal volume you'll spend pennies a day. Override the model with `OPENAI_MODEL=gpt-4o` if you want longer/better drafts.
-
-**Want to use a different model entirely?** Edit `src/lib/agent.ts` — `draftConnectMessage` uses the Vercel AI SDK, so swapping in `@ai-sdk/anthropic`, `@ai-sdk/google`, `@ai-sdk/mistral`, or any OpenAI-compatible provider is a one-line change. You're not locked into OpenAI; the starter just defaults to it.
-
-### Step 5 — Clone and configure
+`.env`:
 
 ```bash
-git clone https://github.com/kamskans/myagentmail-outreach-starter
-cd myagentmail-outreach-starter
-cp .env.example .env
+MYAGENTMAIL_API_KEY=tk_...
+OPENAI_API_KEY=sk-...
+# Optional: explicit webhook URL. If unset and you're behind ngrok / cloudflared,
+# the agent will use the inbound request's origin for /api/webhook.
+MYAGENTMAIL_WEBHOOK_URL=https://your-ngrok.io/api/webhook
+# Optional: set this AFTER first signal creation to verify webhook signatures
+MYAGENTMAIL_WEBHOOK_SECRET=whsec_...
+# Optional: tweak the model
+OPENAI_MODEL=gpt-4o-mini
 ```
 
-Open `.env` and fill in:
+## The flow
 
-```bash
-MYAGENTMAIL_API_KEY=tk_...    # from step 3
-OPENAI_API_KEY=sk-proj-...    # from step 4
-CRON_SECRET=$(openssl rand -hex 32)   # any random string
+### 1. Onboarding (`/onboarding`)
 
-# Leave blank for now; you'll get this in step 7 when you create the signal
-MYAGENTMAIL_WEBHOOK_SECRET=
-```
+Six-step wizard:
 
-Install + run:
+1. **Website URL** — paste your company site, AI reads it and infers everything.
+2. **Connect LinkedIn** — drop in the `LinkedInConnect` widget (cookies AES-256-GCM encrypted at rest by MyAgentMail; never logged).
+3. **Ideal Customer** — review/edit AI-inferred ICP: job titles, industries, locations, company sizes, types, exclusion list.
+4. **Detect** — review/edit AI-suggested keywords + competitor company pages + influencer profiles + a job-change watchlist (paste profile URLs you want to monitor for role changes).
+5. **Objectives** — pain points, campaign goal (start conversations / book demo), message tone (professional / conversational / direct), precision (high / discovery).
+6. **Launch** — one click creates the actual signals on MyAgentMail and kicks the first poll. Land on `/leads` with results streaming in.
 
-```bash
-npm install
-bash scripts/install-hooks.sh   # one-time — installs the secret-scan pre-commit hook
-npm run dev
-# → http://localhost:3000
-```
+### 2. Leads queue (`/leads`)
 
-The pre-commit hook refuses any commit that contains a real-looking API key, token, or private-key block. Placeholders like `tk_your_key_here` / `change-me` / `REDACTED` are allowed. If you ever need to bypass for a one-off (don't make this a habit): `git commit --no-verify`.
+One row per matched person. Each row has independent LinkedIn outreach state and email outreach state. The trigger context (post excerpt, verbatim engager comment, or job-change diff) is shown inline with the lead. Two CTAs:
 
-Open http://localhost:3000. You'll see the setup checklist on the homepage — most boxes should already be ticked.
+- **Draft LinkedIn** — calls `/api/leads/[id]/draft?channel=linkedin`. Generates a 280-char personalized note via the agent's voice config + the trigger context. Editable inline; click **Send** to fire a connection request from your real LinkedIn account.
+- **Draft email** — calls `/api/leads/[id]/draft?channel=email`. Generates subject + body. Editable inline; click **Send** to dispatch via your provisioned MyAgentMail inbox.
 
-### Step 6 — Connect a LinkedIn account
-
-In the starter app: **LinkedIn accounts → Add account**.
-
-The connect flow is provided by the **`@myagentmail/react`** drop-in widget — same component you can drop into your own app once you fork this. It handles every LinkedIn auth path with one component import + one server-side proxy line:
-
-```tsx
-// src/app/accounts/page.tsx
-<LinkedInConnect
-  proxyUrl="/api/myagentmail/linkedin"
-  onConnected={({ sessionId }) => { /* save it */ }}
-/>
-```
-
-```ts
-// src/app/api/myagentmail/linkedin/[...path]/route.ts
-import { linkedInProxyHandler } from "@myagentmail/react/server";
-export const { POST } = linkedInProxyHandler({ apiKey: process.env.MYAGENTMAIL_API_KEY! });
-```
-
-The widget itself supports two ways to connect — either works:
-
-#### Option A — Email + password
-
-Type the LinkedIn email + password. LinkedIn will issue a verification challenge — and the same challenge can be satisfied two ways at once:
-
-1. **Tap the push notification on the LinkedIn mobile app** ("Sign-in request — Yes, it's me"). The widget polls the approval endpoint in the background and auto-completes when you tap.
-2. **Type the 6-digit PIN** that LinkedIn emails to the account.
-
-Whichever you finish first wins. Both paths are shown side-by-side in the widget. Most LinkedIn integrations only handle the PIN, leaving users confused when they tap the mobile push and nothing happens — this widget handles both natively.
-
-#### Option B — Import cookies
-
-If you'd rather skip the password flow entirely, paste the `li_at` and `JSESSIONID` cookies from a logged-in browser session:
-
-1. Open https://www.linkedin.com in Chrome (must be logged in)
-2. DevTools (⌘⌥I) → **Application** → **Cookies** → `https://www.linkedin.com`
-3. Copy `li_at` (long string) and `JSESSIONID` (the value WITH the surrounding quotes — looks like `"ajax:1234567890"`)
-4. Paste both into the **Import cookies** tab in the dialog
-
-This path bypasses LinkedIn's verification entirely because we're using cookies that LinkedIn already issued to your existing browser session. **Recommended for production-grade integrations** — most outreach tools default to this path.
-
-#### Either way
-
-- Credentials and cookies are sent to MyAgentMail and **AES-256-GCM encrypted at rest**. We never log them.
-- You can revoke any account from the same screen — the stored cookies are wiped.
-- After connection, all subsequent calls (post search, profile lookup, send connection, intent-signal polling) use the stored session — no further verification needed.
-
-> ⚠️ **Use a real LinkedIn account that has activity history.** Brand-new or empty accounts are flagged faster by LinkedIn's anti-automation systems. The default signal-polling cadence is conservative (daily) for exactly this reason.
-
-### Step 7 — Create your first signal
-
-In the starter app: **Intent signals → New signal**. Fill in:
-
-- **Name** → e.g. *"Founders complaining about cold email"*
-- **LinkedIn search keyword** → e.g. *"outbound is broken"* (the exact phrase MyAgentMail will search for in posts from the last 24h on each poll)
-- **Connected LinkedIn account** → the one you just connected
-- **Cadence** → start with **Daily** (recommended for a real account)
-- **Webhook URL** → `http://localhost:3000/api/webhook` (already prefilled to your local app)
-- **Filter — minimum intent** → **Medium and above** (recommended)
-
-When you click **Create signal**, MyAgentMail returns a **webhook secret** (`whsec_…`) — copy it, paste it into your `.env`:
-
-```bash
-MYAGENTMAIL_WEBHOOK_SECRET=whsec_paste_it_here
-```
-
-Restart `npm run dev` so the new env loads. Now incoming webhooks will be HMAC-verified before the queue accepts them.
-
-### Step 8 — Test it end-to-end
-
-Two options:
-
-**A. Use the "Run now" button** on the signal row to trigger an immediate poll. Within a minute the matches show up in **Approval queue**. (Note: you can also expose your local app to MyAgentMail's webhooks via [ngrok](https://ngrok.com) or [cloudflared](https://github.com/cloudflare/cloudflared) — set `MYAGENTMAIL_WEBHOOK_URL=https://<your-ngrok>.ngrok.io/api/webhook` when creating the signal so it reaches your laptop.)
-
-**B. Use the test-webhook endpoint** to fire a synthetic match without polling LinkedIn:
-
-```bash
-curl -X POST https://myagentmail.com/v1/linkedin/signals/<signal-id>/test-webhook \
-  -H "X-API-Key: $MYAGENTMAIL_API_KEY"
-```
-
-Either way, the queue at `localhost:3000/queue` will show:
-- The author + LinkedIn post excerpt
-- The agent's intent score and reason
-- A pre-drafted connection note (editable)
-- **Approve** / **Reject** buttons
-
-Click **Approve** on a high-intent match. The starter calls MyAgentMail's `/v1/linkedin/connections` and the request goes out via your connected account.
-
-That's the loop. Add more signals, tune the prompts in `src/lib/agent.ts`, swap the queue UI — the whole thing is 3K lines.
-
-### Beyond keyword signals — engagement + watchlist
-
-The same webhook handler (`/api/webhook`) handles all three MyAgentMail signal kinds. Each one fires a different event type and the starter picks the right drafter automatically:
-
-| Kind | Event type | Use case | Drafter |
-|---|---|---|---|
-| **Keyword** (default) | `signal.match` | Search the past 24h for posts matching a phrase. | `draftConnectMessage` — references the post body. |
-| **Engagement** | `signal.engagement` | Watch a profile or company; fire on every engager (commenter or reactor) the firing rule matches. | `draftEngagementConnectMessage` — quotes the engager's verbatim comment back at them. |
-| **Watchlist** | `signal.job_change` | Track a list of profiles weekly; fire when role/company changes AND the new role matches the firing rule. | `draftJobChangeConnectMessage` — references the specific role transition. |
-
-To create one of the new kinds, use the dashboard or the SDK:
-
-```typescript
-import { MyAgentMail } from "myagentmail";
-const mam = new MyAgentMail({ apiKey: process.env.MYAGENTMAIL_API_KEY! });
-
-// Engagement signal — every engager on Acme's company posts.
-await mam.linkedin.signals.createEngagement({
-  name: "Acme company-page engagers",
-  target: { kind: "company", url: "https://www.linkedin.com/company/acme/" },
-  intentDescription:
-    "Flag engagers who are heads-of-sales or RevOps at SaaS companies " +
-    "between Series A and C — skip Acme employees, competitors, recruiters.",
-  webhookUrl: "https://your-app.com/api/webhook",
-  filterMinIntent: "medium",
-});
-
-// Watchlist signal — track champions for job changes.
-await mam.linkedin.signals.createWatchlist({
-  name: "Champions watchlist",
-  profileUrls: [
-    "https://www.linkedin.com/in/jane-doe-eng/",
-    "https://www.linkedin.com/in/john-smith-pm/",
-  ],
-  intentDescription:
-    "Fire when this person's NEW role is at a SaaS company between $5M and $100M ARR.",
-  webhookUrl: "https://your-app.com/api/webhook",
-});
-```
-
-**Cadence gating:** engagement signals fan out hard (multiple posts × reactions + comments per poll), so sub-daily cadence is gated by tier. Solo (2 sessions) clamps to **daily**; team (10) unlocks **every_12h**; agency (50) unlocks **every_6h**. Watchlist signals are always daily — entries get walked oldest-polled-first across the day.
-
-**Webhook payload shapes:** see `https://myagentmail.com/skills/myagentmail/references/linkedin.md` for full schemas of all three event types.
-
----
+The queue auto-refreshes every 5 seconds, so a freshly launched agent shows leads as they arrive.
 
 ## Architecture
 
 | Layer | What |
 |---|---|
-| `src/app/page.tsx` | Dashboard (setup status + counters) |
-| `src/app/managed-signals/` | UI over MyAgentMail's signal API |
-| `src/app/accounts/` | LinkedIn account manager |
-| `src/app/queue/` | Review/approve drafts |
-| `src/app/leads/` | Manual lead list + optional RocketReach enrichment |
-| `src/app/inboxes/` | View provisioned MyAgentMail inboxes |
-| `src/app/api/webhook/route.ts` | Receives `signal.match`, `signal.engagement`, and `signal.job_change` webhooks. HMAC-verifies, picks the kind-appropriate drafter (`agent.ts`), queues for approval. |
-| `src/app/api/managed-signals/` | Thin proxy to MyAgentMail's `/v1/linkedin/signals` |
-| `src/lib/myagentmail.ts` | SDK helpers over `/v1/inboxes`, `/v1/linkedin/*`, `/v1/linkedin/signals` |
-| `src/lib/agent.ts` | Vercel AI SDK + OpenAI for drafting connection notes |
-| `src/lib/action-runner.ts` | Dispatches approved actions back to MyAgentMail |
-| `src/lib/db.ts` | SQLite (`better-sqlite3`) at `data/outreach.db` |
+| `src/app/onboarding/page.tsx` | Six-step wizard. Single file, ~600 lines. |
+| `src/app/leads/page.tsx` | Unified leads queue with inline drafters + senders. |
+| `src/app/page.tsx` | Overview / setup-status home page. |
+| `src/app/accounts/`, `src/app/inboxes/` | LinkedIn account manager + inbox provisioning. |
+| `src/app/api/agent/infer/` | POSTs the user's website URL → calls the LLM → returns inferred ICP. |
+| `src/app/api/agent/config/` | GET/POST the singleton `agent_config` row. |
+| `src/app/api/agent/launch/` | Reads agent_config, creates one signal per detection source on MyAgentMail, kicks first polls. |
+| `src/app/api/leads/[id]/draft/` | Generates LinkedIn or email draft on demand. |
+| `src/app/api/leads/[id]/send/` | Fires the saved draft via MAM (LinkedIn connection or inbox send). |
+| `src/app/api/webhook/route.ts` | Receives signal.match / signal.engagement / signal.job_change webhooks. HMAC-verifies, upserts into `new_leads`. |
+| `src/lib/agent.ts` | All LLM prompts: ICP inference, firing-rule generator, LinkedIn drafter, cold-email drafter. |
+| `src/lib/db.ts` | SQLite schema: `agent_config` (singleton config) + `new_leads` (unified queue). |
+| `src/lib/myagentmail.ts` | Thin SDK helpers over `/v1/inboxes`, `/v1/linkedin/*`, `/v1/linkedin/signals`. Now includes `createEngagementSignal`, `createWatchlistSignal`, `sendLinkedInConnect`. |
 
----
+## What's deliberately NOT in v1
 
-## Configuration reference
+- **Multi-step sequencing** — *"Day 0: connect, Day 3: email, Day 7: follow-up"*. Punted to v2. The schema has `auto_send_linkedin` and `auto_send_email` flags as future hooks.
+- **Reply-thread handling** — replies land in your provisioned inbox; we don't surface them in `/leads` yet.
+- **Manual lead enrichment** — RocketReach integration removed. Email enrichment remains on the customer's side until v2.
+- **Multi-tenant** — single agent config (singleton row at `id=1`). Forking for multi-tenant is a half-day's work.
 
-All settings live in `.env`. Full list with defaults in [`.env.example`](.env.example).
+## Customizing
 
-| Variable | Required? | What it does |
-|---|---|---|
-| `MYAGENTMAIL_API_KEY` | Yes | Tenant master key from https://myagentmail.com/dashboard/api-keys |
-| `MYAGENTMAIL_WEBHOOK_SECRET` | Recommended | Returned when you create a signal. Used for HMAC verification on `/api/webhook`. Without it, the webhook accepts unsigned payloads (dev only). |
-| `OPENAI_API_KEY` | Yes (or any AI SDK provider) | For drafting connection notes **locally**. Classification is bundled server-side. Swap providers in `src/lib/agent.ts` if you'd rather use Anthropic / Google / Mistral / a local model. |
-| `OPENAI_MODEL` | No | Default `gpt-4o-mini`. Swap to `gpt-4o` for higher-quality drafts. |
-| `CRON_SECRET` | Yes | Any random string. Only used by the legacy `/api/cron` route — kept for backwards compat with the self-hosted polling mode. |
-| `ROCKETREACH_API_KEY` | No | Enables lead enrichment on `/leads`. Skip if you don't need it. |
-| `MYAGENTMAIL_BASE_URL` | No | Defaults to `https://myagentmail.com`. Override only for self-hosted MyAgentMail. |
-| `MYAGENTMAIL_DEFAULT_INBOX` | No | Username for the auto-provisioned inbox (defaults to `scout`). |
-| `DATABASE_PATH` | No | SQLite location. Defaults to `./data/outreach.db`. |
-| `APPROVAL_MODE` | No | `manual` (default) or `auto`. Autonomous mode skips the queue — only enable once you trust the prompts. |
+- **Different LLM**: swap `gpt-4o-mini` via `OPENAI_MODEL=gpt-4o`. Or replace the `@ai-sdk/openai` import in `lib/agent.ts` with `@ai-sdk/anthropic` etc — Vercel AI SDK keeps the call signature identical.
+- **Different voice**: edit the system prompts in `lib/agent.ts`. Specifically `draftLinkedInMessage` and `draftColdEmail`.
+- **Different ICP fields**: extend `IcpInference` schema in `lib/agent.ts` and the matching `agent_config` columns in `lib/db.ts`.
+- **More signal kinds**: each "track keywords / track companies / track profiles / watchlist" surface in onboarding maps to one signal-creation call in `/api/agent/launch`. Add a fifth list, add a fifth call.
 
----
+## See also
 
-## Deploying
-
-### Local laptop
-
-What the steps above produce. Use [ngrok](https://ngrok.com) to expose `/api/webhook` to MyAgentMail if you want real-time webhook delivery.
-
-### Vercel
-
-```bash
-vercel
-```
-
-Set the same env vars in the project's Settings → Environment Variables. **Caveat:** the SQLite file at `./data/outreach.db` won't persist across serverless invocations on Vercel. Either deploy on a VPS where the disk persists, or swap `src/lib/db.ts` to a hosted DB (Postgres / Turso / Supabase — ~30 lines).
-
-### Self-hosted (any VPS)
-
-```bash
-npm run build && npm run start
-# → port 3000
-```
-
-No cron job to schedule — webhooks are pushed by MyAgentMail.
-
-### Docker
-
-PRs welcome. Roughly: standard Next.js multi-stage Dockerfile + a volume mount for `/app/data`.
-
----
-
-## Safety
-
-LinkedIn flags accounts that send too many connection requests, too fast. Defaults here are conservative:
-
-- **Manual approval mode** — nothing sends until you click Approve.
-- **Per-account daily action limits** are enforced server-side by MyAgentMail (your tier sets the cap).
-- **Conservative cadences** — daily / 12h / 6h / manual are the only options for signal polling. No hourly or sub-hourly cadence is exposed.
-- **The classifier prompt** is tuned to skip generic posts, recruiter spam, content marketers, and vendor pitches. Only authors who are plausibly the source of the signal get engaged with.
-
-You're still responsible for what gets sent. LinkedIn-side actions (account warnings, restrictions, bans) are between you and LinkedIn — see MyAgentMail's [LinkedIn module ToS](https://myagentmail.com/terms-linkedin).
-
----
-
-## Troubleshooting
-
-**`/api/probe` shows the api unreachable from web.** That's a MyAgentMail-side issue — confirm `https://myagentmail.com/health` returns 200 and check status at https://myagentmail.com.
-
-**Webhook verifies fail (`bad signature`).** The secret in `.env` must match the one returned when you created the signal. If you've lost it, create a new signal — the secret is shown only at creation time.
-
-**Signal polls return 0 matches.** Try a more popular keyword. LinkedIn search returns *recent* posts (last 24h on each poll), so niche keywords may take days to surface anything. Test with something like `"AI agents"` first.
-
-**`LINKEDIN_RATE_LIMITED` error on the signal.** The connected LinkedIn account hit LinkedIn's per-account rate limit. The signal pauses for 24h automatically. Reduce cadence to `daily`, or use a different LinkedIn account.
-
-**`SESSION_LIMIT_REACHED` when connecting an account.** Your tier caps how many LinkedIn accounts you can connect (Solo: 1, Team: 5, Agency: 25). Upgrade or disconnect an unused account.
-
----
-
-## Why this exists
-
-Goji-style "contextual outreach" tools are valuable but expensive and locked into a single platform. This shows you can build the same workflow on top of MyAgentMail's API — and **own every layer of the stack**. Your data, your prompts, your queue, your customizations.
-
-Fork it. Wire it into your CRM. Add Twitter/X. Add HackerNews. Replace the queue UI with Slack approvals. The agent loop is ~150 lines.
-
----
-
-## License
-
-MIT — do whatever you want.
-
-## Resources
-
-**API + docs**
-- [MyAgentMail homepage](https://myagentmail.com)
-- [API reference](https://myagentmail.com/docs) — interactive OpenAPI
-- [Raw OpenAPI spec](https://myagentmail.com/openapi.yaml)
-- [Knowledge base](https://myagentmail.com/kb) — concepts, recipes, deliverability
-- [Build an AI lead agent in 6 API calls](https://myagentmail.com/kb/example-lead-agent) — this starter's reference architecture
-
-**For AI-driven development**
-- [Agent skill (SKILL.md)](https://myagentmail.com/skills/myagentmail/SKILL.md) — drop into `~/.claude/skills/myagentmail/`
-- [LinkedIn reference](https://myagentmail.com/skills/myagentmail/references/linkedin.md)
-- [Webhooks reference](https://myagentmail.com/skills/myagentmail/references/webhooks.md)
-- [WebSockets reference](https://myagentmail.com/skills/myagentmail/references/websockets.md)
-- [`myagentmail-mcp` on npm](https://www.npmjs.com/package/myagentmail-mcp) — MCP server for Claude Desktop, Cursor, Windsurf, Cline
-- [`myagentmail` on npm](https://www.npmjs.com/package/myagentmail) — TypeScript SDK
-- [`@myagentmail/react` on npm](https://www.npmjs.com/package/@myagentmail/react) — drop-in `<LinkedInConnect />` widget
-
-**Plans + legal**
-- [LinkedIn module pricing](https://myagentmail.com/linkedin#pricing)
-- [LinkedIn module ToS](https://myagentmail.com/terms-linkedin)
-- [Privacy policy](https://myagentmail.com/privacy)
+- [MyAgentMail LinkedIn skill reference](https://myagentmail.com/skills/myagentmail/references/linkedin.md) — full schemas for all three signal kinds + webhook payload shapes.
+- [Building an Intent-Based Outreach System](https://myagentmail.com/blog/intent-based-outreach-tutorial) — long-form tutorial that walks through this same starter.
+- [`myagentmail` SDK on npm](https://www.npmjs.com/package/myagentmail).
+- [`myagentmail-mcp` for Claude / Cursor / Windsurf](https://www.npmjs.com/package/myagentmail-mcp).

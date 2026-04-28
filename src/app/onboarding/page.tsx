@@ -1,537 +1,662 @@
 "use client";
 
 /**
- * Guided onboarding — Gojiberry-style multi-step wizard that walks the
- * user from "I have a MyAgentMail account" to "my AI agent is watching
- * LinkedIn for buyers" in five steps:
+ * Onboarding wizard — Gojiberry-style flow.
  *
- *   1. Connect LinkedIn      — widget OR pick existing session
- *   2. Define your ICP       — plain-English firing rule
- *   3. Choose precision      — Discovery / Balanced / High Precision
- *   4. Preview matches       — historical search seed (past month)
- *   5. Launch                — POST /v1/linkedin/signals + redirect
- *
- * Once finished, the agent starts polling on the chosen cadence and
- * matches arrive via the local /api/webhook route. Re-visiting this
- * page lets the user create another signal without re-doing step 1.
+ *   1. Website          — paste URL, run AI inference
+ *   2. Connect LinkedIn — widget or pick existing session
+ *   3. Ideal Customer   — review/edit the inferred ICP
+ *   4. Detect           — review/edit keywords + companies + profiles
+ *   5. Objectives       — pain points + goal + tone + precision
+ *   6. Launch           — creates MAM signals, kicks first poll, lands on /leads
  */
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { LinkedInConnect } from "@myagentmail/react";
-import "@myagentmail/react/styles.css";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  Linkedin,
-  Search as SearchIcon,
-  Sparkles,
-  Target,
-  Lightbulb,
-} from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { ArrowRight, ArrowLeft, Loader2, Sparkles, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { LinkedInConnect } from "@myagentmail/react";
 
-type Session = { id: string; label: string | null; status: string };
-type Lookback = "past-24h" | "past-week" | "past-month";
-type Intent = "low" | "medium" | "high";
-type Precision = "discovery" | "balanced" | "high";
+type Step = "website" | "linkedin" | "icp" | "detect" | "objectives" | "launch";
 
-type ResultRow = {
-  postUrl: string;
-  postExcerpt: string;
-  author: { name: string; profileUrl: string };
-  classification: { engage: boolean; intent: Intent; reason: string };
+type Inferred = {
+  companyName: string;
+  productPitch: string;
+  targetJobTitles: string[];
+  targetIndustries: string[];
+  targetLocations: string[];
+  targetCompanySizes: string[];
+  targetCompanyTypes: string[];
+  excludeCompanies: string[];
+  trackKeywords: string[];
+  trackCompanies: string[];
+  trackProfiles: string[];
+  painPoints: string;
 };
 
-const STEPS = [
-  { id: "linkedin", label: "Connect LinkedIn" },
-  { id: "icp", label: "Define ICP" },
-  { id: "precision", label: "Choose precision" },
-  { id: "preview", label: "Preview" },
-  { id: "launch", label: "Launch" },
+const COMPANY_SIZE_OPTIONS = [
+  "1-10",
+  "11-50",
+  "51-200",
+  "201-500",
+  "501-1000",
+  "1001-5000",
+  "5000+",
 ];
-
-const PRECISION_TO_FILTER: Record<Precision, Intent> = {
-  discovery: "low",
-  balanced: "medium",
-  high: "high",
-};
+const COMPANY_TYPE_OPTIONS = ["Startup", "Private Company", "Public Company", "Agency", "Nonprofit"];
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const [step, setStep] = React.useState(0);
-  const [sessions, setSessions] = React.useState<Session[]>([]);
-
-  // Form state across the wizard
-  const [sessionId, setSessionId] = React.useState("");
-  const [name, setName] = React.useState("");
-  const [keyword, setKeyword] = React.useState("");
-  const [intentDescription, setIntentDescription] = React.useState("");
-  const [precision, setPrecision] = React.useState<Precision>("balanced");
-
-  // Step 4 preview state
-  const [previewing, setPreviewing] = React.useState(false);
-  const [previewResults, setPreviewResults] = React.useState<ResultRow[] | null>(null);
-
+  const [step, setStep] = React.useState<Step>("website");
+  const [websiteUrl, setWebsiteUrl] = React.useState("");
+  const [inferring, setInferring] = React.useState(false);
+  const [inferred, setInferred] = React.useState<Inferred | null>(null);
+  const [linkedinAccount, setLinkedinAccount] = React.useState<string | null>(null);
+  const [campaignGoal, setCampaignGoal] = React.useState("connect");
+  const [messageTone, setMessageTone] = React.useState<"professional" | "conversational" | "direct">(
+    "professional",
+  );
+  const [precision, setPrecision] = React.useState<"discovery" | "high">("high");
+  const [watchlistText, setWatchlistText] = React.useState("");
   const [launching, setLaunching] = React.useState(false);
 
-  // Load existing sessions for step 1. We do NOT auto-pick a session
-  // anymore — the new default is "" = auto-distribute, which uses
-  // every healthy account the tenant has connected.
-  const reloadSessions = React.useCallback(async () => {
-    const r = await fetch("/api/managed-signals");
-    const d = await r.json().catch(() => ({}));
-    const list: Session[] = d.sessions || [];
-    setSessions(list);
+  React.useEffect(() => {
+    fetch("/api/agent/config")
+      .then((r) => r.json())
+      .then((data) => {
+        const cfg = data?.config;
+        if (cfg?.websiteUrl) {
+          setWebsiteUrl(cfg.websiteUrl);
+          setInferred({
+            companyName: cfg.companyName,
+            productPitch: cfg.productPitch,
+            targetJobTitles: cfg.targetJobTitles ?? [],
+            targetIndustries: cfg.targetIndustries ?? [],
+            targetLocations: cfg.targetLocations ?? [],
+            targetCompanySizes: cfg.targetCompanySizes ?? [],
+            targetCompanyTypes: cfg.targetCompanyTypes ?? [],
+            excludeCompanies: cfg.excludeCompanies ?? [],
+            trackKeywords: cfg.trackKeywords ?? [],
+            trackCompanies: cfg.trackCompanies ?? [],
+            trackProfiles: cfg.trackProfiles ?? [],
+            painPoints: cfg.painPoints ?? "",
+          });
+          setCampaignGoal(cfg.campaignGoal ?? "connect");
+          setMessageTone(cfg.messageTone ?? "professional");
+          setPrecision(cfg.precision ?? "high");
+          setWatchlistText((cfg.watchlistProfiles ?? []).join("\n"));
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  React.useEffect(() => {
-    reloadSessions();
-  }, [reloadSessions]);
-
-  function next() {
-    setStep((s) => Math.min(STEPS.length - 1, s + 1));
-  }
-  function back() {
-    setStep((s) => Math.max(0, s - 1));
-  }
-
-  async function runPreview() {
-    setPreviewing(true);
-    setPreviewResults(null);
-    const r = await fetch("/api/historical-search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: sessionId || null,
-        query: keyword.trim(),
-        lookback: "past-month" as Lookback,
-        minIntent: PRECISION_TO_FILTER[precision],
-        intentDescription: intentDescription.trim(),
-        limit: 25,
-      }),
-    });
-    const data = await r.json();
-    setPreviewing(false);
-    if (data.error) {
-      toast.error(data.error);
+  async function runInference() {
+    const url = websiteUrl.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      toast.error("Enter a full URL starting with https://");
       return;
     }
-    setPreviewResults(data.results || []);
+    setInferring(true);
+    try {
+      const r = await fetch("/api/agent/infer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ websiteUrl: url }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "inference failed");
+      setInferred(data.icp);
+      await fetch("/api/agent/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ websiteUrl: url, ...data.icp }),
+      });
+      setStep("linkedin");
+    } catch (err: any) {
+      toast.error(err?.message ?? "AI inference failed");
+    } finally {
+      setInferring(false);
+    }
+  }
+
+  async function persist(patch: Partial<Inferred> & Record<string, unknown> = {}) {
+    if (!inferred) return;
+    await fetch("/api/agent/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...inferred, ...patch }),
+    });
   }
 
   async function launch() {
+    if (!inferred) return;
     setLaunching(true);
-    const r = await fetch("/api/managed-signals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: name.trim(),
-        query: keyword.trim(),
-        sessionId: sessionId || null,
-        cadence: "every_6h",
-        filterMinIntent: PRECISION_TO_FILTER[precision],
-        intentDescription: intentDescription.trim(),
-        webhookUrl:
-          typeof window === "undefined" ? undefined : `${window.location.origin}/api/webhook`,
-      }),
-    });
-    const data = await r.json();
-    setLaunching(false);
-    if (data.signal) {
-      toast.success("Agent is now watching LinkedIn");
-      router.push("/managed-signals");
-    } else {
-      toast.error(data.error || "Failed to create signal");
+    try {
+      const watchlistProfiles = watchlistText
+        .split(/\n+/)
+        .map((s) => s.trim())
+        .filter((s) => /linkedin\.com\/in\//.test(s));
+      await fetch("/api/agent/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...inferred,
+          watchlistProfiles,
+          campaignGoal,
+          messageTone,
+          precision,
+        }),
+      });
+      const r = await fetch("/api/agent/launch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runImmediately: true }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "launch failed");
+      toast.success(
+        `Agent launched — ${data.created} signal(s) created. First leads arriving in seconds.`,
+      );
+      router.push("/leads");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Launch failed");
+      setLaunching(false);
     }
   }
 
-  // ── Per-step validation gates the Next button ─────────────────────────
-  const canAdvance = (() => {
-    switch (STEPS[step].id) {
-      case "linkedin":
-        // Auto-distribute is valid (sessionId === ""). The gate is
-        // simply: at least one connected account.
-        return sessions.length > 0;
-      case "icp":
-        return name.trim().length > 0 && keyword.trim().length >= 2 && intentDescription.trim().length >= 10;
-      case "precision":
-        return Boolean(precision);
-      case "preview":
-        return previewResults !== null;
-      case "launch":
-        return true;
-      default:
-        return false;
-    }
-  })();
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Set up your AI agent</h1>
+    <div className="mx-auto max-w-3xl space-y-6 p-6">
+      <div className="text-center">
+        <h1 className="text-3xl font-bold tracking-tight">Set up your AI lead agent</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Five steps. Three minutes. By the end your agent is watching LinkedIn for the buyers you
-          care about and queuing personalized openers.
+          Five minutes. Your agent watches LinkedIn for buying intent and surfaces leads to your
+          queue.
         </p>
       </div>
 
-      <Stepper current={step} />
+      <ProgressDots step={step} />
 
-      {STEPS[step].id === "linkedin" ? (
-        <Step icon={<Linkedin className="h-5 w-5 text-primary" />} title="Connect a LinkedIn account">
-          <p className="text-sm text-muted-foreground">
-            Your agent reads LinkedIn through your real session — same posts you see in your
-            browser. Cookies are AES-256-GCM encrypted at rest on MyAgentMail.
-          </p>
-          {sessions.length > 0 ? (
-            <div className="mt-4 space-y-2">
-              <Label>Routing</Label>
-              <select
-                value={sessionId || "__auto__"}
-                onChange={(e) =>
-                  setSessionId(e.target.value === "__auto__" ? "" : e.target.value)
-                }
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="__auto__">
-                  Auto-distribute across all {sessions.length} connected{" "}
-                  {sessions.length === 1 ? "account" : "accounts"} (recommended)
-                </option>
-                {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    Pin to: {s.label || s.id.slice(0, 8)}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-muted-foreground">
-                Auto spreads polling and profile lookups across every connected account, multiplying
-                your daily LinkedIn quota and protecting any single account from rate limits.{" "}
-                <span className="font-medium text-foreground">
-                  Connect another account below to add headroom.
-                </span>
-              </p>
-            </div>
-          ) : (
-            <p className="mt-4 text-xs text-muted-foreground">
-              No LinkedIn account connected yet. Use the widget below.
+      {step === "website" && (
+        <Card className="space-y-4 p-6">
+          <div>
+            <h2 className="text-xl font-semibold">Start with your website</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              We&apos;ll use AI to infer your ideal customer profile and the LinkedIn signals worth
+              monitoring. You&apos;ll review and edit before anything launches.
             </p>
-          )}
-          <div className="mt-4 flex justify-center">
-            <LinkedInConnect
-              proxyUrl="/api/myagentmail/linkedin"
-              onConnected={async ({ sessionId: _newId }) => {
-                await fetch("/api/accounts/track", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ sessionId: _newId }),
-                }).catch(() => {});
-                await reloadSessions();
-                // Stay in auto-distribute mode after a connect — let the
-                // user opt into pinning explicitly via the dropdown.
-                toast.success("LinkedIn connected");
+          </div>
+          <div>
+            <Label htmlFor="website">Company website</Label>
+            <Input
+              id="website"
+              placeholder="https://yourcompany.com"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") runInference();
               }}
-              onError={(err) => toast.error(err.message)}
             />
           </div>
-        </Step>
-      ) : null}
+          <Button onClick={runInference} disabled={inferring || !websiteUrl}>
+            {inferring ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Reading your site...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" /> Generate ICP with AI
+              </>
+            )}
+          </Button>
+        </Card>
+      )}
 
-      {STEPS[step].id === "icp" ? (
-        <Step icon={<Target className="h-5 w-5 text-primary" />} title="Describe your ideal customer">
-          <p className="text-sm text-muted-foreground">
-            Plain English. The classifier uses this as the authoritative definition of what should
-            fire — the keyword is just a coarse pre-filter for the LinkedIn search.
-          </p>
-          <div className="mt-4 space-y-3">
+      {step === "linkedin" && (
+        <Card className="space-y-4 p-6">
+          <div>
+            <h2 className="text-xl font-semibold">Connect your LinkedIn account</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Polling runs against your real account. Cookies are AES-256 encrypted at rest and
+              never leave MyAgentMail.
+            </p>
+          </div>
+          <LinkedInConnect
+            proxyUrl="/api/myagentmail/linkedin"
+            onConnected={(s) => {
+              setLinkedinAccount(s.sessionId);
+              toast.success("LinkedIn connected");
+            }}
+          />
+          <NavRow
+            onBack={() => setStep("website")}
+            onNext={() => setStep("icp")}
+            nextLabel="Continue"
+            nextDisabled={false}
+            nextHint={!linkedinAccount ? "(skip if you'll connect later)" : ""}
+          />
+        </Card>
+      )}
+
+      {step === "icp" && inferred && (
+        <Card className="space-y-5 p-6">
+          <div className="flex items-start justify-between">
             <div>
-              <Label htmlFor="name">Agent name</Label>
-              <Input
-                id="name"
-                placeholder="e.g. Founders complaining about cold email"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Just for you — shows up in /managed-signals.
+              <h2 className="text-xl font-semibold">Define your ideal customer</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                AI-generated from your website. Edit anything that&apos;s off.
               </p>
             </div>
+            <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs text-orange-800">
+              <Sparkles className="mr-1 inline h-3 w-3" />
+              AI-generated
+            </span>
+          </div>
+          <ChipList
+            label="Target job titles"
+            values={inferred.targetJobTitles}
+            onChange={(v) => setInferred({ ...inferred, targetJobTitles: v })}
+            placeholder="e.g. VP Sales"
+          />
+          <ChipList
+            label="Target industries"
+            values={inferred.targetIndustries}
+            onChange={(v) => setInferred({ ...inferred, targetIndustries: v })}
+            placeholder="e.g. SaaS"
+          />
+          <ChipList
+            label="Target locations"
+            values={inferred.targetLocations}
+            onChange={(v) => setInferred({ ...inferred, targetLocations: v })}
+            placeholder="e.g. United States"
+          />
+          <MultiSelect
+            label="Company sizes"
+            values={inferred.targetCompanySizes}
+            options={COMPANY_SIZE_OPTIONS}
+            onChange={(v) => setInferred({ ...inferred, targetCompanySizes: v })}
+          />
+          <MultiSelect
+            label="Company types"
+            values={inferred.targetCompanyTypes}
+            options={COMPANY_TYPE_OPTIONS}
+            onChange={(v) => setInferred({ ...inferred, targetCompanyTypes: v })}
+          />
+          <ChipList
+            label="Companies & keywords to exclude"
+            values={inferred.excludeCompanies}
+            onChange={(v) => setInferred({ ...inferred, excludeCompanies: v })}
+            placeholder="e.g. Upwork"
+          />
+          <NavRow
+            onBack={() => setStep("linkedin")}
+            onNext={async () => {
+              await persist();
+              setStep("detect");
+            }}
+            nextLabel="Continue"
+            nextDisabled={false}
+          />
+        </Card>
+      )}
+
+      {step === "detect" && inferred && (
+        <Card className="space-y-5 p-6">
+          <div className="flex items-start justify-between">
             <div>
-              <Label htmlFor="keyword">LinkedIn keyword</Label>
-              <Input
-                id="keyword"
-                placeholder='e.g. "outbound is broken"'
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Short and broad. The classifier filters down with your firing rule.
+              <h2 className="text-xl font-semibold">What we&apos;ll detect</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Pre-selected the most relevant intent signals for your business. Edit any.
               </p>
             </div>
-            <div>
-              <Label htmlFor="rule">Firing rule</Label>
-              <textarea
-                id="rule"
-                rows={5}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                placeholder="e.g. Flag as ready when the author is a founder or operator at a B2B SaaS company complaining about cold email being broken, low reply rates, or their outbound team being burned out. Skip vendors selling outbound tools, agencies, content marketers, and recruiters posting job ads."
-                value={intentDescription}
-                onChange={(e) => setIntentDescription(e.target.value)}
-                maxLength={2000}
+            <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs text-orange-800">
+              <Sparkles className="mr-1 inline h-3 w-3" />
+              AI-generated
+            </span>
+          </div>
+          <ChipList
+            label="Track keywords"
+            sublabel="People posting these phrases — quoted phrases work best."
+            values={inferred.trackKeywords}
+            onChange={(v) => setInferred({ ...inferred, trackKeywords: v })}
+            placeholder='e.g. "outbound is broken"'
+          />
+          <ChipList
+            label="Track competitor company pages"
+            sublabel="LinkedIn /company/ URLs — we'll surface engagers on their posts."
+            values={inferred.trackCompanies}
+            onChange={(v) => setInferred({ ...inferred, trackCompanies: v })}
+            placeholder="https://linkedin.com/company/competitor"
+          />
+          <ChipList
+            label="Track influencer profiles"
+            sublabel="LinkedIn /in/ URLs — we'll surface engagers on their posts."
+            values={inferred.trackProfiles}
+            onChange={(v) => setInferred({ ...inferred, trackProfiles: v })}
+            placeholder="https://linkedin.com/in/creator"
+          />
+          <div>
+            <Label>Watchlist (job changes)</Label>
+            <p className="mb-1 text-[11px] text-muted-foreground">
+              Past customers, ex-coworkers, champions. We notify you when their role/company
+              changes. One LinkedIn /in/ URL per line.
+            </p>
+            <textarea
+              rows={4}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+              placeholder={"https://linkedin.com/in/jane-doe/\nhttps://linkedin.com/in/john-smith/"}
+              value={watchlistText}
+              onChange={(e) => setWatchlistText(e.target.value)}
+            />
+          </div>
+          <NavRow
+            onBack={() => setStep("icp")}
+            onNext={async () => {
+              await persist();
+              setStep("objectives");
+            }}
+            nextLabel="Continue"
+            nextDisabled={false}
+          />
+        </Card>
+      )}
+
+      {step === "objectives" && inferred && (
+        <Card className="space-y-5 p-6">
+          <div>
+            <h2 className="text-xl font-semibold">Define your objectives</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              We&apos;ll use these to draft your outreach messages.
+            </p>
+          </div>
+          <div>
+            <Label>Pain points</Label>
+            <p className="mb-1 text-[11px] text-muted-foreground">
+              What pain does your product solve for your ICP?
+            </p>
+            <textarea
+              rows={4}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={inferred.painPoints}
+              onChange={(e) => setInferred({ ...inferred, painPoints: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Campaign goal</Label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              <Choice
+                active={campaignGoal === "connect"}
+                onClick={() => setCampaignGoal("connect")}
+                title="Start conversations"
+                sub="Build relationships, low friction"
               />
-              <div className="mt-1 flex items-start gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 p-2">
-                <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" />
-                <p className="text-[11px] text-muted-foreground">
-                  Tip: include both <em>who fires</em> (founder/operator at SaaS) and{" "}
-                  <em>who doesn&apos;t</em> (vendors, agencies, recruiters). The classifier
-                  needs the negatives too.
-                </p>
-              </div>
+              <Choice
+                active={campaignGoal === "book_demo"}
+                onClick={() => setCampaignGoal("book_demo")}
+                title="Book a demo"
+                sub="Direct, schedule a call"
+              />
             </div>
           </div>
-        </Step>
-      ) : null}
-
-      {STEPS[step].id === "precision" ? (
-        <Step icon={<Sparkles className="h-5 w-5 text-primary" />} title="Choose your agent's precision">
-          <p className="text-sm text-muted-foreground">
-            How strict should the agent be when forwarding matches to your webhook? You can change
-            this later.
-          </p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <PrecisionCard
-              selected={precision === "discovery"}
-              onClick={() => setPrecision("discovery")}
-              label="Discovery"
-              tagline="More volume, more noise"
-              body="Forward every match the firing rule accepts. Best for early exploration when you want to see everything."
-            />
-            <PrecisionCard
-              selected={precision === "balanced"}
-              onClick={() => setPrecision("balanced")}
-              label="Balanced"
-              tagline="Recommended"
-              body="Forward only matches the classifier scores medium-or-higher intent. The default sweet spot."
-            />
-            <PrecisionCard
-              selected={precision === "high"}
-              onClick={() => setPrecision("high")}
-              label="High Precision"
-              tagline="Fewer, better leads"
-              body="Forward only the strongest matches — the author is actively asking for what you sell. Lowest noise."
-            />
-          </div>
-          <p className="mt-3 text-[11px] text-muted-foreground">
-            Note: <em>all</em> matches that pass the firing rule are still stored — you can see
-            them in the dashboard. This setting only gates which ones trigger the webhook to your
-            outreach handler.
-          </p>
-        </Step>
-      ) : null}
-
-      {STEPS[step].id === "preview" ? (
-        <Step icon={<SearchIcon className="h-5 w-5 text-primary" />} title="Preview what your agent will catch">
-          <p className="text-sm text-muted-foreground">
-            Before turning the watcher on, run the firing rule against the past month of LinkedIn.
-            This uses one LinkedIn API call against your connected account and shows what your
-            agent would have surfaced.
-          </p>
-          <div className="mt-4">
-            <Button onClick={runPreview} disabled={previewing}>
-              <SearchIcon className="h-4 w-4" />
-              {previewing ? "Searching past month…" : previewResults ? "Re-run preview" : "Run preview"}
-            </Button>
-          </div>
-          {previewResults !== null ? (
-            <div className="mt-4 rounded-md border bg-muted/20">
-              <div className="border-b px-4 py-2 text-xs text-muted-foreground">
-                {previewResults.length} match{previewResults.length === 1 ? "" : "es"} in the past
-                month
-              </div>
-              {previewResults.length === 0 ? (
-                <div className="p-6 text-center text-xs text-muted-foreground">
-                  No matches yet. Try widening your keyword or relaxing the firing rule, then go
-                  back to step 2.
-                </div>
-              ) : (
-                <ul className="divide-y">
-                  {previewResults.slice(0, 8).map((r) => (
-                    <li key={r.postUrl} className="px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium">{r.author.name || "—"}</span>
-                        <Badge
-                          variant={
-                            r.classification.intent === "high"
-                              ? "default"
-                              : r.classification.intent === "medium"
-                                ? "warning"
-                                : "outline"
-                          }
-                        >
-                          {r.classification.intent} intent
-                        </Badge>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {r.postExcerpt || "(no excerpt)"}
-                      </p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        <em>{r.classification.reason}</em>
-                      </p>
-                    </li>
-                  ))}
-                  {previewResults.length > 8 ? (
-                    <li className="px-4 py-2 text-center text-[11px] text-muted-foreground">
-                      + {previewResults.length - 8} more — full list available after launch
-                    </li>
-                  ) : null}
-                </ul>
-              )}
+          <div>
+            <Label>Message tone</Label>
+            <div className="mt-1 grid grid-cols-3 gap-2">
+              <Choice
+                active={messageTone === "professional"}
+                onClick={() => setMessageTone("professional")}
+                title="Professional"
+                sub="Formal, polished"
+              />
+              <Choice
+                active={messageTone === "conversational"}
+                onClick={() => setMessageTone("conversational")}
+                title="Conversational"
+                sub="Friendly, casual"
+              />
+              <Choice
+                active={messageTone === "direct"}
+                onClick={() => setMessageTone("direct")}
+                title="Direct"
+                sub="Bold, confident"
+              />
             </div>
-          ) : null}
-        </Step>
-      ) : null}
-
-      {STEPS[step].id === "launch" ? (
-        <Step icon={<CheckCircle2 className="h-5 w-5 text-primary" />} title="Ready to launch">
-          <p className="text-sm text-muted-foreground">Review your setup. Hit Launch when you&apos;re happy.</p>
-          <dl className="mt-4 space-y-2 rounded-md border bg-muted/20 p-4 text-sm">
-            <Row label="Agent">{name}</Row>
-            <Row label="LinkedIn keyword"><code className="rounded bg-muted px-1">{keyword}</code></Row>
-            <Row label="Precision">{precision}</Row>
-            <Row label="Cadence">Every 6 hours</Row>
-            <Row label="Webhook">
-              <code className="rounded bg-muted px-1 text-[11px]">/api/webhook</code> (this app)
-            </Row>
-            <div className="border-t pt-2">
-              <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                Firing rule
-              </dt>
-              <dd className="mt-1 whitespace-pre-wrap text-xs">{intentDescription}</dd>
+          </div>
+          <div>
+            <Label>Precision</Label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              <Choice
+                active={precision === "high"}
+                onClick={() => setPrecision("high")}
+                title="High precision"
+                sub="Fewer, better leads"
+              />
+              <Choice
+                active={precision === "discovery"}
+                onClick={() => setPrecision("discovery")}
+                title="Discovery mode"
+                sub="More leads, broader"
+              />
             </div>
-          </dl>
-          <p className="mt-4 text-[11px] text-muted-foreground">
-            On every fired match the agent will POST a signed payload to{" "}
-            <code className="rounded bg-muted px-1">/api/webhook</code>. The starter&apos;s default
-            handler queues the lead for outreach. Edit it to change what happens.
-          </p>
-        </Step>
-      ) : null}
+          </div>
+          <NavRow
+            onBack={() => setStep("detect")}
+            onNext={() => setStep("launch")}
+            nextLabel="Review"
+            nextDisabled={false}
+          />
+        </Card>
+      )}
 
-      <div className="flex items-center justify-between border-t pt-4">
-        <Button variant="ghost" onClick={back} disabled={step === 0}>
-          <ArrowLeft className="h-4 w-4" />
-          Back
+      {step === "launch" && inferred && (
+        <Card className="space-y-5 p-6">
+          <div>
+            <h2 className="text-xl font-semibold">Launch your agent</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              We&apos;ll create your intent signals and run the first poll immediately. First leads
+              arrive in seconds.
+            </p>
+          </div>
+          <Summary
+            title="Will create"
+            items={[
+              `${inferred.trackKeywords.filter(Boolean).length} keyword signal(s)`,
+              `${inferred.trackCompanies.filter(Boolean).length} company-engagement signal(s)`,
+              `${inferred.trackProfiles.filter(Boolean).length} profile-engagement signal(s)`,
+              `${watchlistText.split(/\n+/).filter((s) => /linkedin\.com\/in\//.test(s)).length} watchlist entries`,
+            ]}
+          />
+          <NavRow
+            onBack={() => setStep("objectives")}
+            onNext={launch}
+            nextLabel={launching ? "Launching…" : "Launch agent"}
+            nextDisabled={launching}
+            nextLoading={launching}
+          />
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ProgressDots({ step }: { step: Step }) {
+  const order: Step[] = ["website", "linkedin", "icp", "detect", "objectives", "launch"];
+  const idx = order.indexOf(step);
+  return (
+    <div className="flex justify-center gap-1.5">
+      {order.map((s, i) => (
+        <div key={s} className={`h-1.5 w-8 rounded-full ${i <= idx ? "bg-primary" : "bg-muted"}`} />
+      ))}
+    </div>
+  );
+}
+
+function ChipList({
+  label,
+  sublabel,
+  values,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  sublabel?: string;
+  values: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = React.useState("");
+  function add() {
+    const v = draft.trim();
+    if (!v) return;
+    onChange([...values, v]);
+    setDraft("");
+  }
+  return (
+    <div>
+      <Label>{label}</Label>
+      {sublabel ? <p className="mb-1 text-[11px] text-muted-foreground">{sublabel}</p> : null}
+      <div className="flex gap-2">
+        <Input
+          placeholder={placeholder}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Button variant="outline" onClick={add}>
+          <Plus className="h-4 w-4" />
         </Button>
-        {STEPS[step].id === "launch" ? (
-          <Button onClick={launch} disabled={launching}>
-            {launching ? "Launching…" : "Launch agent"}
-            <Sparkles className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button onClick={next} disabled={!canAdvance}>
-            Next step
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        )}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {values.map((v, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs text-orange-900"
+          >
+            {v}
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((_, j) => j !== i))}
+              className="hover:text-orange-700"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
       </div>
     </div>
   );
 }
 
-function Stepper({ current }: { current: number }) {
-  return (
-    <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-      {STEPS.map((s, i) => {
-        const done = i < current;
-        const active = i === current;
-        return (
-          <li key={s.id} className="flex items-center gap-2">
-            <span
-              className={
-                done
-                  ? "grid h-5 w-5 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground"
-                  : active
-                    ? "grid h-5 w-5 place-items-center rounded-full bg-primary/15 text-[11px] font-medium text-primary"
-                    : "grid h-5 w-5 place-items-center rounded-full bg-muted text-[11px] font-medium"
-              }
-            >
-              {done ? "✓" : i + 1}
-            </span>
-            <span className={active ? "font-medium text-foreground" : ""}>{s.label}</span>
-            {i < STEPS.length - 1 ? <span className="mx-1 text-muted-foreground/60">›</span> : null}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function Step({
-  icon,
-  title,
-  children,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card className="p-6">
-      <div className="mb-3 flex items-center gap-3">
-        <span className="grid h-9 w-9 place-items-center rounded-md bg-primary/10">{icon}</span>
-        <h2 className="text-lg font-semibold">{title}</h2>
-      </div>
-      <div>{children}</div>
-    </Card>
-  );
-}
-
-function PrecisionCard({
-  selected,
-  onClick,
+function MultiSelect({
   label,
-  tagline,
-  body,
+  options,
+  values,
+  onChange,
 }: {
-  selected: boolean;
-  onClick: () => void;
   label: string;
-  tagline: string;
-  body: string;
+  options: string[];
+  values: string[];
+  onChange: (v: string[]) => void;
+}) {
+  function toggle(v: string) {
+    if (values.includes(v)) onChange(values.filter((x) => x !== v));
+    else onChange([...values, v]);
+  }
+  return (
+    <div>
+      <Label>{label}</Label>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            className={`rounded-full border px-3 py-1 text-xs ${
+              values.includes(opt)
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input bg-background text-muted-foreground"
+            }`}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Choice({
+  active,
+  onClick,
+  title,
+  sub,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  sub: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={
-        selected
-          ? "rounded-md border-2 border-primary bg-primary/5 p-4 text-left transition-colors"
-          : "rounded-md border-2 border-transparent bg-muted/30 p-4 text-left transition-colors hover:bg-muted/50"
-      }
+      className={`rounded-md border p-3 text-left ${
+        active ? "border-primary bg-primary/5" : "border-input bg-background"
+      }`}
     >
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold">{label}</span>
-        {selected ? <Badge>Selected</Badge> : null}
-      </div>
-      <p className="mt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {tagline}
-      </p>
-      <p className="mt-2 text-xs text-muted-foreground">{body}</p>
+      <div className="text-sm font-medium">{title}</div>
+      <div className="text-xs text-muted-foreground">{sub}</div>
     </button>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Summary({ title, items }: { title: string; items: string[] }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</dt>
-      <dd className="text-right text-sm">{children}</dd>
+    <div className="rounded-md border bg-muted/40 p-3 text-sm">
+      <div className="mb-1 font-medium">{title}</div>
+      <ul className="space-y-0.5 text-xs text-muted-foreground">
+        {items.map((it, i) => (
+          <li key={i}>• {it}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function NavRow({
+  onBack,
+  onNext,
+  nextLabel,
+  nextDisabled,
+  nextLoading,
+  nextHint,
+}: {
+  onBack: () => void;
+  onNext: () => void;
+  nextLabel: string;
+  nextDisabled: boolean;
+  nextLoading?: boolean;
+  nextHint?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between border-t pt-4">
+      <Button variant="ghost" onClick={onBack}>
+        <ArrowLeft className="h-4 w-4" /> Back
+      </Button>
+      <div className="flex items-center gap-2">
+        {nextHint ? <span className="text-xs text-muted-foreground">{nextHint}</span> : null}
+        <Button onClick={onNext} disabled={nextDisabled}>
+          {nextLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {nextLabel} <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
     </div>
   );
 }
