@@ -25,9 +25,22 @@ yarn-error.log*
 pnpm-debug.log*
 
 # local env files — NEVER COMMIT
+# Catches every name shape: .env, .env.local, .env.production, .env.development,
+# .env.staging, .env.test, .env.foo.bar. The only env file that belongs in
+# git is .env.example (placeholders only), explicitly un-ignored below.
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
+!.env*.example
+
+# other secret-shaped files
+*.key
+*.p12
+*.cert
+*.crt
+secrets/
+credentials/
+.secrets
 
 # sqlite
 data/

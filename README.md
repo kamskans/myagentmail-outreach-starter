@@ -131,9 +131,12 @@ Install + run:
 
 ```bash
 npm install
+bash scripts/install-hooks.sh   # one-time — installs the secret-scan pre-commit hook
 npm run dev
 # → http://localhost:3000
 ```
+
+The pre-commit hook refuses any commit that contains a real-looking API key, token, or private-key block. Placeholders like `tk_your_key_here` / `change-me` / `REDACTED` are allowed. If you ever need to bypass for a one-off (don't make this a habit): `git commit --no-verify`.
 
 Open http://localhost:3000. You'll see the setup checklist on the homepage — most boxes should already be ticked.
 

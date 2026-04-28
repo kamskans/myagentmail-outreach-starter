@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+#
+# Pre-commit secret scan. Blocks the commit if a staged file contains
+# anything that looks like a real API key, token, or private key.
+#
+# Why this exists: we leaked a workspace key once via an OpenAPI example
+# value. The fix is to never let a credential-shaped string land in git
+# in the first place. This hook runs on every `git commit` and exits
+# non-zero on any match — git refuses to create the commit.
+#
+# Install once per clone:
+#   bash scripts/install-hooks.sh
+#
+# To intentionally allow a flagged value (e.g. a placeholder like
+# "tk_your_key_here"), the regexes below already exempt obvious dummy
+# patterns. If you really need to bypass for a one-off, use:
+#   git commit --no-verify
+# (don't make this a habit).
+
+# Files we never need to scan — generated, vendored, or known-safe.
+SKIP_PATHS_REGEX='(^|/)(node_modules|dist|build|\.next|\.turbo|coverage|\.git|out)/|\.lock$|\.lockb$|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$|bun\.lockb$|\.tsbuildinfo$|\.map$'
+
+# Patterns that match REAL credential shapes. Each line below is a
+# self-contained ERE pattern; the hook fails the commit on any match.
+PATTERNS=(
+  # MyAgentMail keys: tk_/wk_/ak_/sa_ + 30+ alphanumeric
+  '\b(tk|wk|ak|sa)_[A-Za-z0-9]{30,}\b'
+  # Stripe live + test secret + restricted keys
+  '\bsk_(live|test)_[A-Za-z0-9_]{20,}\b'
+  '\brk_(live|test)_[A-Za-z0-9_]{20,}\b'
+  # Webhook signing secrets
+  '\bwhsec_[A-Za-z0-9]{30,}\b'
+  # Resend
+  '\bre_[A-Za-z0-9_-]{20,}\b'
+  # OpenRouter
+  '\bsk-or-v1-[a-f0-9]{30,}\b'
+  # Anthropic
+  '\bsk-ant-[A-Za-z0-9_-]{40,}\b'
+  # OpenAI / generic sk- with high entropy
+  '\bsk-[A-Za-z0-9_-]{45,}\b'
+  # npm tokens
+  '\bnpm_[A-Za-z0-9]{30,}\b'
+  # AWS access keys
+  '\bAKIA[0-9A-Z]{16}\b'
+  # GitHub tokens
+  '\bghp_[A-Za-z0-9]{30,}\b'
+  '\bgithub_pat_[A-Za-z0-9_]{50,}\b'
+  # Slack bot/user tokens
+  '\bxox[bp]-[A-Za-z0-9-]{20,}\b'
+  # PEM blocks
+  '-----BEGIN[A-Z ]+PRIVATE KEY-----'
+)
+
+# Patterns that are explicitly ALLOWED (placeholders, examples, redactions).
+# Tested AFTER pattern match — if the matching line contains any of these,
+# it's treated as a placeholder and not flagged.
+ALLOWLIST_REGEX='(your_key_here|your-api-key|YOUR_API_KEY|YOUR_KEY|<your[ _-]|placeholder|REDACTED|REDACT|EXAMPLE|example|tk_your|sk_test_REPLACE|whsec_\.\.\.|re_\.\.\.|sk-\.\.\.|change[-_ ]?me|REPLACE_WITH|XXXXXXXX|CHANGEME)'
+
+red() { printf '\033[31m%s\033[0m\n' "$1"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
+green() { printf '\033[32m%s\033[0m\n' "$1"; }
+
+# Every staged file (added/modified/copied/renamed), but not deleted.
+# Use `while read` instead of mapfile so this runs on bash 3.2 (macOS default).
+STAGED_FILE="$(mktemp -t mam-precommit-staged)"
+git diff --cached --name-only --diff-filter=ACMR > "$STAGED_FILE"
+if [[ ! -s "$STAGED_FILE" ]]; then
+  rm -f "$STAGED_FILE"
+  exit 0
+fi
+
+HITS_FILE="$(mktemp -t mam-precommit-hits)"
+HIT_COUNT=0
+
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  # Skip vendored / generated / lockfiles.
+  if [[ "$f" =~ $SKIP_PATHS_REGEX ]]; then continue; fi
+  # Skip the hook itself + this script's siblings (they reference the
+  # patterns by definition).
+  if [[ "$f" == "scripts/git-hooks/pre-commit" || "$f" == "scripts/install-hooks.sh" ]]; then continue; fi
+  # Skip binary files. `git diff --cached --numstat` reports `-` for both
+  # add/del counts on binaries.
+  numstat=$(git diff --cached --numstat -- "$f" | head -1)
+  if [[ "$numstat" =~ ^-[[:space:]]+- ]]; then continue; fi
+  # Pull the staged blob (NOT the working-tree file) so we scan exactly
+  # what's about to be committed.
+  blob=$(git show ":$f" 2>/dev/null) || continue
+
+  for pat in "${PATTERNS[@]}"; do
+    while IFS= read -r match_line; do
+      [[ -z "$match_line" ]] && continue
+      if [[ "$match_line" =~ $ALLOWLIST_REGEX ]]; then continue; fi
+      # match_line is "lineno:content"
+      printf '%s:%s\n' "$f" "$match_line" >> "$HITS_FILE"
+      HIT_COUNT=$((HIT_COUNT+1))
+    done < <(printf '%s\n' "$blob" | grep -nE -e "$pat" || true)
+  done
+done < "$STAGED_FILE"
+
+rm -f "$STAGED_FILE"
+
+if [[ $HIT_COUNT -eq 0 ]]; then
+  rm -f "$HITS_FILE"
+  exit 0
+fi
+
+red "✗ Pre-commit secret scan FAILED — credential-shaped strings detected:"
+echo
+head -30 "$HITS_FILE" | sed 's/^/  /'
+if [[ $HIT_COUNT -gt 30 ]]; then
+  yellow "  ... and $((HIT_COUNT - 30)) more"
+fi
+rm -f "$HITS_FILE"
+echo
+yellow "Fix:"
+echo "  • If this is a real credential — REMOVE it from the file and rotate the key."
+echo "  • If this is a placeholder/example — change it to one of: 'YOUR_KEY', 'placeholder',"
+echo "    'REDACTED', 'example', 'change-me'. The hook will allow those."
+echo "  • If you ABSOLUTELY need to commit anyway (last resort): git commit --no-verify"
+echo
+exit 1
