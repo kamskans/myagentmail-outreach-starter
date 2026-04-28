@@ -31,6 +31,7 @@ import {
   Send,
   Archive,
   Loader2,
+  Search,
 } from "lucide-react";
 import { fmtDate } from "@/lib/utils";
 
@@ -141,6 +142,7 @@ export default function LeadsPage() {
 
 function LeadRow({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
   const [busyChannel, setBusyChannel] = React.useState<"linkedin" | "email" | null>(null);
+  const [enriching, setEnriching] = React.useState(false);
   const [showDraftLinkedIn, setShowDraftLinkedIn] = React.useState(false);
   const [showDraftEmail, setShowDraftEmail] = React.useState(false);
   const [linkedinText, setLinkedinText] = React.useState(lead.linkedinDraft ?? "");
@@ -198,6 +200,25 @@ function LeadRow({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
       toast.error(err?.message ?? "Send failed");
     } finally {
       setBusyChannel(null);
+    }
+  }
+
+  async function enrich() {
+    setEnriching(true);
+    try {
+      const r = await fetch(`/api/leads/${lead.id}/enrich`, { method: "POST" });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "enrichment failed");
+      toast.success(
+        data.cached
+          ? `Already had ${data.email}`
+          : `Found ${data.email}${data.confidence ? ` (${data.confidence})` : ""}`,
+      );
+      onChanged();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Could not find an email");
+    } finally {
+      setEnriching(false);
     }
   }
 
@@ -298,6 +319,17 @@ function LeadRow({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
           )}
           {lead.emailDraftBody ? (showDraftEmail ? "Hide draft" : "View draft") : "Draft email"}
         </Button>
+        {!lead.email ? (
+          <Button size="sm" variant="ghost" onClick={enrich} disabled={enriching || !lead.profileUrl}>
+            {enriching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            Find email
+          </Button>
+        ) : (
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-700">
+            <Mail className="h-3.5 w-3.5" />
+            {lead.email}
+          </span>
+        )}
         <Button size="sm" variant="ghost" onClick={archive}>
           <Archive className="h-4 w-4" /> Archive
         </Button>
@@ -363,7 +395,8 @@ function LeadRow({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
           </Button>
           {!lead.email ? (
             <p className="text-[11px] text-amber-700">
-              No email yet — enrich this lead first or paste an address manually.
+              No email on file — click <strong>Find email</strong> above (uses RocketReach by
+              default; configure the key in /onboarding step 1) or paste an address manually.
             </p>
           ) : null}
         </div>

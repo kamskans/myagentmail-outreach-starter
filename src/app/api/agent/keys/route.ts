@@ -24,6 +24,7 @@ const ENV_PATH = path.resolve(process.cwd(), ".env");
 type KeyStatus = {
   myagentmail: { set: boolean; placeholder: boolean };
   openai: { set: boolean; placeholder: boolean };
+  rocketreach: { set: boolean; placeholder: boolean };
   webhookSecret: { set: boolean };
 };
 
@@ -38,6 +39,7 @@ function currentStatus(): KeyStatus {
   return {
     myagentmail: statusFor(process.env.MYAGENTMAIL_API_KEY, /^tk_your_key_here$/),
     openai: statusFor(process.env.OPENAI_API_KEY, /^sk-your_key_here$|^$/),
+    rocketreach: statusFor(process.env.ROCKETREACH_API_KEY, /^your_rocketreach_key_here$/),
     webhookSecret: { set: !!(process.env.MYAGENTMAIL_WEBHOOK_SECRET || "").trim() },
   };
 }
@@ -99,6 +101,19 @@ export async function POST(req: Request) {
     }
     updates.OPENAI_API_KEY = v;
     process.env.OPENAI_API_KEY = v;
+  }
+  if (typeof body.rocketreachApiKey === "string" && body.rocketreachApiKey.trim()) {
+    // RocketReach keys are an alphanumeric string — no fixed prefix.
+    // We just check non-empty + reasonable length.
+    const v = body.rocketreachApiKey.trim();
+    if (v.length < 16) {
+      return NextResponse.json(
+        { error: "RocketReach key looks too short — paste the full key from rocketreach.co/api." },
+        { status: 400 },
+      );
+    }
+    updates.ROCKETREACH_API_KEY = v;
+    process.env.ROCKETREACH_API_KEY = v;
   }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Provide at least one key to save." }, { status: 400 });

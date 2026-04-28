@@ -99,9 +99,8 @@ The queue auto-refreshes every 5 seconds, so a freshly launched agent shows lead
 
 ## What's deliberately NOT in v1
 
-- **Multi-step sequencing** — *"Day 0: connect, Day 3: email, Day 7: follow-up"*. Punted to v2. The schema has `auto_send_linkedin` and `auto_send_email` flags as future hooks.
 - **Reply-thread handling** — replies land in your provisioned inbox; we don't surface them in `/leads` yet.
-- **Manual lead enrichment** — RocketReach integration removed. Email enrichment remains on the customer's side until v2.
+- **Multi-step sequencing** — *"Day 0: connect, Day 3: email, Day 7: follow-up"*. Email enrichment is wired (RocketReach by default; provider-agnostic — see `src/lib/enrichment.ts`) but the sequencer / cadence / reply-detection layer is v2.
 - **Multi-tenant** — single agent config (singleton row at `id=1`). Forking for multi-tenant is a half-day's work.
 
 ## Customizing

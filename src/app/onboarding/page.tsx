@@ -26,6 +26,7 @@ type Step = "keys" | "website" | "linkedin" | "icp" | "detect" | "objectives" | 
 type KeyStatus = {
   myagentmail: { set: boolean; placeholder: boolean };
   openai: { set: boolean; placeholder: boolean };
+  rocketreach: { set: boolean; placeholder: boolean };
   webhookSecret: { set: boolean };
 };
 
@@ -61,6 +62,7 @@ export default function OnboardingPage() {
   const [keyStatus, setKeyStatus] = React.useState<KeyStatus | null>(null);
   const [mamKey, setMamKey] = React.useState("");
   const [openaiKey, setOpenaiKey] = React.useState("");
+  const [rocketreachKey, setRocketreachKey] = React.useState("");
   const [savingKeys, setSavingKeys] = React.useState(false);
   const [keysJustSaved, setKeysJustSaved] = React.useState(false);
   const [websiteUrl, setWebsiteUrl] = React.useState("");
@@ -90,7 +92,7 @@ export default function OnboardingPage() {
   }, []);
 
   async function saveKeys() {
-    if (!mamKey && !openaiKey) {
+    if (!mamKey && !openaiKey && !rocketreachKey) {
       toast.error("Enter at least one key");
       return;
     }
@@ -102,6 +104,7 @@ export default function OnboardingPage() {
         body: JSON.stringify({
           myagentmailApiKey: mamKey || undefined,
           openaiApiKey: openaiKey || undefined,
+          rocketreachApiKey: rocketreachKey || undefined,
         }),
       });
       const data = await r.json();
@@ -304,6 +307,37 @@ export default function OnboardingPage() {
               placeholder="sk-..."
               value={openaiKey}
               onChange={(e) => setOpenaiKey(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="rr-key">
+              RocketReach API key{" "}
+              <span className="text-muted-foreground">(optional — only for cold email)</span>{" "}
+              {keyStatus?.rocketreach.set ? (
+                <span className="text-emerald-600">✓ configured</span>
+              ) : null}
+            </Label>
+            <p className="mb-1 text-[11px] text-muted-foreground">
+              LinkedIn signals give us the lead&apos;s profile URL but never an email. Add a
+              RocketReach key (
+              <a
+                href="https://rocketreach.co/api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                rocketreach.co/api
+              </a>
+              ) to enable the &quot;Find email&quot; button on each lead. Skip if you only want
+              LinkedIn outreach. To use a different provider (Apollo, Hunter, Clay, Contact Out)
+              edit <code className="rounded bg-muted px-1 text-xs">src/lib/enrichment.ts</code>.
+            </p>
+            <Input
+              id="rr-key"
+              type="password"
+              placeholder="Paste your RocketReach API key"
+              value={rocketreachKey}
+              onChange={(e) => setRocketreachKey(e.target.value)}
             />
           </div>
           <Button onClick={saveKeys} disabled={savingKeys}>
