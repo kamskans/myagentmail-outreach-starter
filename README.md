@@ -232,6 +232,50 @@ Click **Approve** on a high-intent match. The starter calls MyAgentMail's `/v1/l
 
 That's the loop. Add more signals, tune the prompts in `src/lib/agent.ts`, swap the queue UI — the whole thing is 3K lines.
 
+### Beyond keyword signals — engagement + watchlist
+
+The same webhook handler (`/api/webhook`) handles all three MyAgentMail signal kinds. Each one fires a different event type and the starter picks the right drafter automatically:
+
+| Kind | Event type | Use case | Drafter |
+|---|---|---|---|
+| **Keyword** (default) | `signal.match` | Search the past 24h for posts matching a phrase. | `draftConnectMessage` — references the post body. |
+| **Engagement** | `signal.engagement` | Watch a profile or company; fire on every engager (commenter or reactor) the firing rule matches. | `draftEngagementConnectMessage` — quotes the engager's verbatim comment back at them. |
+| **Watchlist** | `signal.job_change` | Track a list of profiles weekly; fire when role/company changes AND the new role matches the firing rule. | `draftJobChangeConnectMessage` — references the specific role transition. |
+
+To create one of the new kinds, use the dashboard or the SDK:
+
+```typescript
+import { MyAgentMail } from "myagentmail";
+const mam = new MyAgentMail({ apiKey: process.env.MYAGENTMAIL_API_KEY! });
+
+// Engagement signal — every engager on Acme's company posts.
+await mam.linkedin.signals.createEngagement({
+  name: "Acme company-page engagers",
+  target: { kind: "company", url: "https://www.linkedin.com/company/acme/" },
+  intentDescription:
+    "Flag engagers who are heads-of-sales or RevOps at SaaS companies " +
+    "between Series A and C — skip Acme employees, competitors, recruiters.",
+  webhookUrl: "https://your-app.com/api/webhook",
+  filterMinIntent: "medium",
+});
+
+// Watchlist signal — track champions for job changes.
+await mam.linkedin.signals.createWatchlist({
+  name: "Champions watchlist",
+  profileUrls: [
+    "https://www.linkedin.com/in/jane-doe-eng/",
+    "https://www.linkedin.com/in/john-smith-pm/",
+  ],
+  intentDescription:
+    "Fire when this person's NEW role is at a SaaS company between $5M and $100M ARR.",
+  webhookUrl: "https://your-app.com/api/webhook",
+});
+```
+
+**Cadence gating:** engagement signals fan out hard (multiple posts × reactions + comments per poll), so sub-daily cadence is gated by tier. Solo (2 sessions) clamps to **daily**; team (10) unlocks **every_12h**; agency (50) unlocks **every_6h**. Watchlist signals are always daily — entries get walked oldest-polled-first across the day.
+
+**Webhook payload shapes:** see `https://myagentmail.com/skills/myagentmail/references/linkedin.md` for full schemas of all three event types.
+
 ---
 
 ## Architecture
@@ -244,7 +288,7 @@ That's the loop. Add more signals, tune the prompts in `src/lib/agent.ts`, swap 
 | `src/app/queue/` | Review/approve drafts |
 | `src/app/leads/` | Manual lead list + optional RocketReach enrichment |
 | `src/app/inboxes/` | View provisioned MyAgentMail inboxes |
-| `src/app/api/webhook/route.ts` | Receives `signal.match` webhooks. HMAC-verifies, drafts via OpenAI, queues for approval. |
+| `src/app/api/webhook/route.ts` | Receives `signal.match`, `signal.engagement`, and `signal.job_change` webhooks. HMAC-verifies, picks the kind-appropriate drafter (`agent.ts`), queues for approval. |
 | `src/app/api/managed-signals/` | Thin proxy to MyAgentMail's `/v1/linkedin/signals` |
 | `src/lib/myagentmail.ts` | SDK helpers over `/v1/inboxes`, `/v1/linkedin/*`, `/v1/linkedin/signals` |
 | `src/lib/agent.ts` | Vercel AI SDK + OpenAI for drafting connection notes |

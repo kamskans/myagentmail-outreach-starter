@@ -76,6 +76,73 @@ Write the note. Output ONLY the message text, no preamble.`,
   return text.trim().slice(0, 280);
 }
 
+/**
+ * Engagement-signal drafter — write a connection note that quotes the
+ * engager's verbatim comment back at them. This is the killer
+ * personalization angle: "Saw your comment on Acme's post about X —
+ * here's how we approached the same thing."
+ */
+export async function draftEngagementConnectMessage(input: {
+  authorName: string;
+  authorHeadline?: string;
+  trackedActorLabel: string;
+  postExcerpt: string;
+  engagerAction: "commented" | "reacted";
+  commentText: string | null;
+  signalName: string;
+  productPitch?: string;
+}): Promise<string> {
+  const { text } = await generateText({
+    model: openai(MODEL_ID),
+    system:
+      "You write LinkedIn connection request notes for warm-lead outreach. Hard limit: 280 characters. Tone: warm, specific, never salesy. The engager just commented on or reacted to a post by a third party we're tracking — quote or paraphrase their comment when present. Open with first name. End with a low-friction question or simple introduction. Plain text. No emoji unless the engager used one in their comment.",
+    prompt: `We're tracking posts by: ${input.trackedActorLabel}
+Post excerpt: """
+${input.postExcerpt || "(post body not captured)"}
+"""
+
+Engager: ${input.authorName}${input.authorHeadline ? ` (${input.authorHeadline})` : ""}
+Action: ${input.engagerAction}${input.commentText ? `\nTheir comment: "${input.commentText}"` : ""}
+
+Why we noticed them: matched our "${input.signalName}" engagement watcher.${
+      input.productPitch ? `\nWhat we do: ${input.productPitch}` : ""
+    }
+
+Write a connection note that references their specific engagement (the comment if present, otherwise the post). Output ONLY the message text.`,
+  });
+  return text.trim().slice(0, 280);
+}
+
+/**
+ * Watchlist-signal drafter — congratulate-the-move opener. Job changes
+ * are warm-intro gold for the first 30-60 days.
+ */
+export async function draftJobChangeConnectMessage(input: {
+  personName: string;
+  oldRole: string | null;
+  oldCompany: string | null;
+  newRole: string;
+  newCompany: string;
+  signalName: string;
+  productPitch?: string;
+}): Promise<string> {
+  const { text } = await generateText({
+    model: openai(MODEL_ID),
+    system:
+      "You write LinkedIn connection notes for newly-changed-job opportunities. Hard limit: 280 characters. Open with first name. Reference the new role specifically. Do NOT congratulate generically (\"congrats on the new role!\") — be specific about the move. End with a low-friction question or introduction.",
+    prompt: `${input.personName} just moved${
+      input.oldRole && input.oldCompany ? ` from ${input.oldRole} at ${input.oldCompany}` : ""
+    } to ${input.newRole} at ${input.newCompany}.
+
+Why we noticed them: matched our "${input.signalName}" job-change watchlist.${
+      input.productPitch ? `\nWhat we do: ${input.productPitch}` : ""
+    }
+
+Write the note. Output ONLY the message text.`,
+  });
+  return text.trim().slice(0, 280);
+}
+
 export async function draftEmail(input: {
   recipientName?: string;
   recipientCompany?: string;

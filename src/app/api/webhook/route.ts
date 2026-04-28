@@ -14,7 +14,11 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { getDb } from "@/lib/db";
-import { draftConnectMessage } from "@/lib/agent";
+import {
+  draftConnectMessage,
+  draftEngagementConnectMessage,
+  draftJobChangeConnectMessage,
+} from "@/lib/agent";
 
 export const dynamic = "force-dynamic";
 
@@ -39,14 +43,20 @@ export async function POST(req: Request) {
     console.warn("[webhook] MYAGENTMAIL_WEBHOOK_SECRET unset — accepting unsigned payloads (dev only)");
   }
 
-  const event = JSON.parse(raw) as {
-    type: "signal.match" | "signal.match.test";
-    signal: { id: string; name: string; query: string };
-    match: { id: string; foundAt: string };
-    post: { url: string; excerpt: string; postedAt: string | null };
-    author: { name: string; profileUrl: string; headline: string | null };
-    classification: { engage: boolean; intent: "high" | "medium" | "low"; reason: string } | null;
-  };
+  type Classification = {
+    engage: boolean;
+    intent: "high" | "medium" | "low";
+    reason: string;
+  } | null;
+
+  // Discriminated union over all three event types myagentmail emits.
+  // Test pings short-circuit at the top.
+  type EventEnvelope =
+    | { type: "signal.match" | "signal.match.test"; signal: { id: string; name: string; query: string }; match: { id: string; foundAt: string }; post: { url: string; excerpt: string; postedAt: string | null }; author: { name: string; profileUrl: string; headline: string | null; role?: string | null; company?: string | null }; classification: Classification }
+    | { type: "signal.engagement"; signal: { id: string; name: string; kind: "engagement" }; match: { id: string; foundAt: string }; target: { kind: "profile" | "company"; url: string; label: string | null }; post: { url: string; excerpt: string; postedAt: string | null }; engager: { name: string; profileUrl: string; headline: string | null; role: string | null; company: string | null; action: "commented" | "reacted"; commentText: string | null }; classification: Classification }
+    | { type: "signal.job_change"; signal: { id: string; name: string; kind: "job_change_watchlist" }; match: { id: string; foundAt: string }; person: { name: string; profileUrl: string; headline: string | null }; change: { oldRole: string | null; oldCompany: string | null; newRole: string; newCompany: string }; classification: Classification };
+
+  const event = JSON.parse(raw) as EventEnvelope;
 
   if (event.type === "signal.match.test") {
     return NextResponse.json({ ok: true, received: "test" });
@@ -62,53 +72,114 @@ export async function POST(req: Request) {
     .get(event.match.id);
   if (existing) return NextResponse.json({ ok: true, deduped: true });
 
-  // Insert a signal_match (for archival) and an action (for the queue).
-  const matchInfo = db
-    .prepare(
-      `INSERT INTO signal_matches
-        (signal_id, post_url, post_excerpt, author_name, author_profile_url, author_headline)
-       VALUES (
-         (SELECT id FROM signals WHERE name = ? LIMIT 1),
-         ?, ?, ?, ?, ?
-       )
-       ON CONFLICT(signal_id, post_url) DO NOTHING`,
-    )
-    .run(
-      event.signal.name,
-      event.post.url,
-      (event.post.excerpt || "").slice(0, 1200),
-      event.author.name || "",
-      event.author.profileUrl || "",
-      event.author.headline ?? null,
-    );
-
-  // Draft a personalized message
+  // Normalize per-event-type into a single shape we hand to the
+  // drafter + the queue. Each branch picks the right fields, the
+  // right drafter, and a one-line "why this fired" reasoning.
+  let authorName = "";
+  let profileUrl = "";
+  let postUrl = "";
+  let postExcerpt = "";
+  let authorHeadline: string | null = null;
   let message = "";
+  let reasoning = "";
+
   try {
-    message = await draftConnectMessage({
-      authorName: event.author.name || "",
-      authorHeadline: event.author.headline ?? undefined,
-      postExcerpt: event.post.excerpt || "",
-      signalName: event.signal.name,
-    });
+    if (event.type === "signal.engagement") {
+      authorName = event.engager.name || "";
+      profileUrl = event.engager.profileUrl || "";
+      postUrl = event.post.url || "";
+      postExcerpt = event.post.excerpt || "";
+      authorHeadline = event.engager.headline ?? null;
+      message = await draftEngagementConnectMessage({
+        authorName,
+        authorHeadline: authorHeadline ?? undefined,
+        trackedActorLabel: event.target.label || event.target.url,
+        postExcerpt,
+        engagerAction: event.engager.action,
+        commentText: event.engager.commentText,
+        signalName: event.signal.name,
+      });
+      reasoning = [
+        `Engaged on ${event.target.label || event.target.url} (${event.engager.action})`,
+        event.classification?.reason,
+        event.classification ? `intent: ${event.classification.intent}` : null,
+      ]
+        .filter(Boolean)
+        .join(" — ");
+    } else if (event.type === "signal.job_change") {
+      authorName = event.person.name || "";
+      profileUrl = event.person.profileUrl || "";
+      authorHeadline = event.person.headline ?? null;
+      // Synthesize a "post URL" for archival uniqueness; job changes
+      // don't have a post.
+      postUrl = `${profileUrl}#job-change=${encodeURIComponent(event.change.newRole)}@${encodeURIComponent(event.change.newCompany)}`;
+      postExcerpt = `Job change: ${event.change.oldRole || "(unknown)"} @ ${event.change.oldCompany || "(unknown)"} → ${event.change.newRole} @ ${event.change.newCompany}`;
+      message = await draftJobChangeConnectMessage({
+        personName: authorName,
+        oldRole: event.change.oldRole,
+        oldCompany: event.change.oldCompany,
+        newRole: event.change.newRole,
+        newCompany: event.change.newCompany,
+        signalName: event.signal.name,
+      });
+      reasoning = [
+        `${event.change.oldRole || "?"} → ${event.change.newRole} at ${event.change.newCompany}`,
+        event.classification?.reason,
+        event.classification ? `intent: ${event.classification.intent}` : null,
+      ]
+        .filter(Boolean)
+        .join(" — ");
+    } else {
+      // Keyword match — original flow.
+      authorName = event.author.name || "";
+      profileUrl = event.author.profileUrl || "";
+      postUrl = event.post.url || "";
+      postExcerpt = event.post.excerpt || "";
+      authorHeadline = event.author.headline ?? null;
+      message = await draftConnectMessage({
+        authorName,
+        authorHeadline: authorHeadline ?? undefined,
+        postExcerpt,
+        signalName: event.signal.name,
+      });
+      reasoning = event.classification
+        ? `${event.classification.reason} (intent: ${event.classification.intent})`
+        : "";
+    }
   } catch (err: any) {
     message = "(draft failed — " + String(err?.message || "").slice(0, 80) + ")";
   }
 
+  // Archive the match — same row shape across all kinds (post_url is
+  // synthetic for job_change but unique-per-match).
+  db.prepare(
+    `INSERT INTO signal_matches
+      (signal_id, post_url, post_excerpt, author_name, author_profile_url, author_headline)
+     VALUES (
+       (SELECT id FROM signals WHERE name = ? LIMIT 1),
+       ?, ?, ?, ?, ?
+     )
+     ON CONFLICT(signal_id, post_url) DO NOTHING`,
+  ).run(
+    event.signal.name,
+    postUrl,
+    postExcerpt.slice(0, 1200),
+    authorName,
+    profileUrl,
+    authorHeadline,
+  );
+
   const payload = {
     matchId: event.match.id,
-    profileUrl: event.author.profileUrl,
-    authorName: event.author.name,
+    eventType: event.type,
+    profileUrl,
+    authorName,
     message,
     signalName: event.signal.name,
-    postUrl: event.post.url,
-    postExcerpt: event.post.excerpt,
+    postUrl,
+    postExcerpt,
     classification: event.classification,
   };
-
-  const reasoning = event.classification
-    ? `${event.classification.reason} (intent: ${event.classification.intent})`
-    : "";
 
   db.prepare(
     `INSERT INTO actions (type, payload, reasoning, status, signal_match_id)
