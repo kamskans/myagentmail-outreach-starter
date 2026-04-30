@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Linkedin, Inbox, Users, Sparkles, Globe } from "lucide-react";
+import { LayoutGrid, Linkedin, Inbox, Users, Sparkles, Globe, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutGrid },
   { href: "/onboarding", label: "Set up agent", icon: Sparkles },
   { href: "/leads", label: "Leads", icon: Users },
+  { href: "/cadences", label: "Cadences", icon: Workflow },
   { href: "/accounts", label: "LinkedIn accounts", icon: Linkedin },
   { href: "/inboxes", label: "Inboxes", icon: Inbox },
   { href: "/domains", label: "Domains", icon: Globe },

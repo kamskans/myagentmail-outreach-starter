@@ -97,10 +97,58 @@ The queue auto-refreshes every 5 seconds, so a freshly launched agent shows lead
 | `src/lib/db.ts` | SQLite schema: `agent_config` (singleton config) + `new_leads` (unified queue). |
 | `src/lib/myagentmail.ts` | Thin SDK helpers over `/v1/inboxes`, `/v1/linkedin/*`, `/v1/linkedin/signals`. Now includes `createEngagementSignal`, `createWatchlistSignal`, `sendLinkedInConnect`. |
 
+## Cadences — multi-step outreach sequences
+
+*"Day 0: LinkedIn invite. Day 3: DM if accepted. Day 7: follow-up email if no reply."*
+
+Two ways to build this — **pick whichever fits your stack**. Nothing in MyAgentMail forces you into the managed engine.
+
+### Option A: managed engine (this starter ships it)
+
+The `<CadenceBuilder>` widget at `/cadences` plus `mamProxyHandler` in `app/api/myagentmail/[...path]/route.ts` give you a visual editor over `POST /v1/cadences`. MyAgentMail runs the cron, branch logic (`after_accept`, `no_reply_to_prev`, `never_replied`), per-cadence daily send caps, and business-hours guard server-side. Webhooks fire on every step — `cadence.step.fired`, `cadence.lead.replied`, `cadence.lead.completed` — already handled in `/api/webhook`.
+
+Enroll a lead from anywhere in your app:
+
+```ts
+await fetch("/api/myagentmail/cadences/<cadenceId>/enrollments", {
+  method: "POST",
+  body: JSON.stringify({ leadExternalId: lead.id, leadEmail: lead.email, leadProfileUrl: lead.profileUrl, inboxId: "ibx_..." }),
+});
+```
+
+### Option B: build your own engine on the raw primitives
+
+If you already run Temporal, Inngest, BullMQ, n8n, a cron + Postgres — wire those to MyAgentMail's send endpoints directly. The cadence resource is a sibling, not a gate.
+
+What you call:
+- `POST /v1/inboxes/:id/messages` — send email through your provisioned Stalwart inbox
+- `POST /v1/linkedin/sessions/:id/invitations` — send LinkedIn invite
+- `POST /v1/linkedin/sessions/:id/messages` — send LinkedIn DM
+
+What you listen for in `/api/webhook`:
+- `message.received` — inbound email reply (= exit cadence)
+- `linkedin.invitation.accepted` — connection accepted (= unblock the next-step gate)
+- `linkedin.message.received` — inbound LinkedIn DM (= exit cadence)
+
+Sketch (Inngest):
+
+```ts
+inngest.createFunction({ id: "outreach" }, { event: "lead.qualified" }, async ({ event, step }) => {
+  await step.run("invite", () => mam.sendLinkedInConnect(event.data.profileUrl, "Hi {{first_name}}, ..."));
+  await step.sleep("wait-3d", "3d");
+  if (!(await isAccepted(event.data.leadId))) return;
+  await step.run("dm", () => mam.sendLinkedInMessage(event.data.profileUrl, "Thanks for connecting..."));
+  await step.sleep("wait-4d", "4d");
+  if (await hasReplied(event.data.leadId)) return;
+  await step.run("email", () => mam.sendEmail({ to: event.data.email, ... }));
+});
+```
+
+You give up the visual editor + the daily-cap / business-hours guards (you'd implement those yourself), but you get to keep your existing orchestration story. Sophisticated teams generally pick this path.
+
 ## What's deliberately NOT in v1
 
 - **Reply-thread handling** — replies land in your provisioned inbox; we don't surface them in `/leads` yet.
-- **Multi-step sequencing** — *"Day 0: connect, Day 3: email, Day 7: follow-up"*. Email enrichment is wired (RocketReach by default; provider-agnostic — see `src/lib/enrichment.ts`) but the sequencer / cadence / reply-detection layer is v2.
 - **Multi-tenant** — single agent config (singleton row at `id=1`). Forking for multi-tenant is a half-day's work.
 
 ## Customizing

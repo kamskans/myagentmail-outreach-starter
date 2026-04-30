@@ -19,7 +19,30 @@ type Classification = {
   reason: string;
 } | null;
 
+type CadenceFiredEvent = {
+  type: "cadence.step.fired";
+  cadenceId: string;
+  enrollmentId: string;
+  stepIndex: number;
+  stepKind: "linkedin_connect" | "linkedin_message" | "email" | "wait";
+  channelUrn: string | null;
+  renderedSubject?: string | null;
+  renderedText?: string | null;
+  firedAt: string;
+};
+
+type CadenceLeadEvent = {
+  type: "cadence.lead.replied" | "cadence.lead.completed" | "cadence.lead.bounced";
+  cadenceId: string;
+  enrollmentId: string;
+  leadExternalId: string | null;
+  occurredAt: string;
+  reason?: string | null;
+};
+
 type EventEnvelope =
+  | CadenceFiredEvent
+  | CadenceLeadEvent
   | {
       type: "signal.match" | "signal.match.test";
       signal: { id: string; name: string; query: string };
@@ -90,6 +113,33 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, received: "test" });
   }
 
+  // ── Cadence engine events ──
+  // Fired by MyAgentMail's server-side cadence runner (the same engine
+  // that powers <CadenceBuilder>). If you're rolling your own cadence
+  // engine via raw primitives, ignore these — they only fire for leads
+  // enrolled in `/v1/cadences/:id/enrollments`.
+  //
+  // Today this just logs. Hook here to:
+  //   - update your local lead status ("contacted", "replied", "bounced")
+  //   - record send activity in your analytics pipeline
+  //   - notify Slack on replies, etc.
+  if (event.type === "cadence.step.fired") {
+    console.log(
+      `[cadence] step fired enrollment=${event.enrollmentId} step=${event.stepIndex} kind=${event.stepKind} channel=${event.channelUrn ?? "—"}`,
+    );
+    return NextResponse.json({ ok: true });
+  }
+  if (
+    event.type === "cadence.lead.replied" ||
+    event.type === "cadence.lead.completed" ||
+    event.type === "cadence.lead.bounced"
+  ) {
+    console.log(
+      `[cadence] ${event.type} enrollment=${event.enrollmentId} lead=${event.leadExternalId ?? "—"} reason=${event.reason ?? "—"}`,
+    );
+    return NextResponse.json({ ok: true });
+  }
+
   if (event.type === "signal.engagement") {
     upsertLeadFromMatch({
       sourceKind: "engagement",
@@ -128,8 +178,7 @@ export async function POST(req: Request) {
       classificationIntent: event.classification?.intent ?? null,
       classificationReason: event.classification?.reason ?? null,
     });
-  } else {
-    // signal.match (keyword)
+  } else if (event.type === "signal.match") {
     upsertLeadFromMatch({
       sourceKind: "keyword",
       sourceMatchId: event.match.id,
