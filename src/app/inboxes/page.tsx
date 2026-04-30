@@ -83,9 +83,8 @@ export default function InboxesPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Inboxes</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Real email addresses provisioned via MyAgentMail. Send + receive + drafts + IMAP/SMTP +
-            real-time WebSocket events. Provision more for separate teams, products, or
-            environments.{" "}
+            Provision and manage real email addresses through MyAgentMail.
+            Click an address to open it in <Link href="/mail" className="text-primary hover:underline">Mail</Link>.{" "}
             <Link href="/domains" className="text-primary hover:underline">
               Bring your own domain →
             </Link>
@@ -144,7 +143,7 @@ export default function InboxesPage() {
               inboxes.map((i) => (
                 <tr key={i.id} className="border-b last:border-b-0 transition-colors hover:bg-muted/40">
                   <td className="px-4 py-3 font-mono">
-                    <Link href={`/inboxes/${i.id}`} className="text-primary hover:underline">
+                    <Link href={`/mail?inboxId=${i.id}`} className="text-primary hover:underline">
                       {i.email}
                     </Link>
                   </td>
@@ -155,8 +154,9 @@ export default function InboxesPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <Link
-                        href={`/inboxes/${i.id}`}
-                        aria-label="Open inbox"
+                        href={`/mail?inboxId=${i.id}`}
+                        aria-label="Open in Mail"
+                        title="Open in Mail"
                         className="rounded p-1 hover:bg-muted"
                       >
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />

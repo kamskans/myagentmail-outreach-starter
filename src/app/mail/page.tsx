@@ -196,6 +196,15 @@ async function sendReply(
   }
 }
 
+// Read ?inboxId=<id> from the URL on first render. We do this with a
+// plain `window` read instead of next/navigation's useSearchParams to
+// avoid forcing the page out of the static-prerender bucket — the
+// hook makes Next bail out on build. Module-level guard handles SSR.
+function initialScopeFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("inboxId");
+}
+
 export default function MailPage() {
   const [folder, setFolder] = React.useState<Folder>("inbox");
   const [inboxes, setInboxes] = React.useState<InboxOption[]>([]);
@@ -205,7 +214,9 @@ export default function MailPage() {
   const [inboxesLoaded, setInboxesLoaded] = React.useState(false);
   // null = "All inboxes" (tenant-wide). Otherwise scope every API call
   // to the selected inbox via ?inboxId=…
-  const [scopeInboxId, setScopeInboxId] = React.useState<string | null>(null);
+  // Lazy initializer so we read window only once at first render
+  // (prevents hydration mismatch + repeated reads on every render).
+  const [scopeInboxId, setScopeInboxId] = React.useState<string | null>(initialScopeFromUrl);
   const [counts, setCounts] = React.useState<FolderCounts | null>(null);
   const [messages, setMessages] = React.useState<MessageRow[] | null>(null);
   const [selected, setSelected] = React.useState<MessageRow | null>(null);
@@ -425,7 +436,18 @@ export default function MailPage() {
         inboxes={inboxes}
         scopeInboxId={scopeInboxId}
         onSelect={(f) => setFolder(f)}
-        onScopeChange={(id) => setScopeInboxId(id)}
+        onScopeChange={(id) => {
+          setScopeInboxId(id);
+          // Reflect scope in the URL so it's bookmarkable + survives
+          // refresh. We use history.replaceState (not Next's router)
+          // to avoid forcing this page off the static-prerender path —
+          // the URL change is purely cosmetic; the page state already
+          // updated via setScopeInboxId above.
+          if (typeof window !== "undefined") {
+            const qs = id ? `?inboxId=${encodeURIComponent(id)}` : "";
+            window.history.replaceState(null, "", `/mail${qs}`);
+          }
+        }}
       />
       <div className="flex-1 flex min-w-0 rounded-lg border bg-background overflow-hidden">
         <MessageList
