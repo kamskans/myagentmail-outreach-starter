@@ -83,6 +83,13 @@ type FolderCounts = {
   trash: { total: number };
 };
 
+type InboxOption = {
+  id: string;
+  username: string;
+  domain: string;
+  displayName?: string | null;
+};
+
 type ThreadDetail = {
   thread: { id: string; messageCount: number };
   messages: Array<{
@@ -191,6 +198,10 @@ async function sendReply(
 
 export default function MailPage() {
   const [folder, setFolder] = React.useState<Folder>("inbox");
+  const [inboxes, setInboxes] = React.useState<InboxOption[]>([]);
+  // null = "All inboxes" (tenant-wide). Otherwise scope every API call
+  // to the selected inbox via ?inboxId=…
+  const [scopeInboxId, setScopeInboxId] = React.useState<string | null>(null);
   const [counts, setCounts] = React.useState<FolderCounts | null>(null);
   const [messages, setMessages] = React.useState<MessageRow[] | null>(null);
   const [selected, setSelected] = React.useState<MessageRow | null>(null);
@@ -198,40 +209,75 @@ export default function MailPage() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [threadLoading, setThreadLoading] = React.useState(false);
 
+  // Load the tenant's inbox list once. Used to render the scope picker.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/myagentmail/inboxes");
+        const json = await res.json();
+        if (cancelled || !res.ok) return;
+        const list: any[] = json.items || json.inboxes || [];
+        setInboxes(
+          list.map((i: any) => ({
+            id: i.id,
+            username: i.username,
+            domain: i.domain,
+            displayName: i.displayName ?? i.display_name ?? null,
+          })),
+        );
+      } catch {
+        /* the picker just stays minimal — All-inboxes still works */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Build the inboxId query suffix once per scope change.
+  const scopeQS = scopeInboxId ? `&inboxId=${encodeURIComponent(scopeInboxId)}` : "";
+
   const loadCounts = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/myagentmail/messages/folders/counts");
+      const url = scopeInboxId
+        ? `/api/myagentmail/messages/folders/counts?inboxId=${encodeURIComponent(scopeInboxId)}`
+        : "/api/myagentmail/messages/folders/counts";
+      const res = await fetch(url);
       const json = await res.json();
       if (res.ok) setCounts(json);
     } catch {
       /* badges are best-effort */
     }
-  }, []);
+  }, [scopeInboxId]);
 
-  const loadMessages = React.useCallback(async (f: Folder) => {
-    setRefreshing(true);
-    try {
-      const res = await fetch(
-        `/api/myagentmail/messages?folder=${f}&group=thread&limit=50`,
-      );
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      setMessages(json.messages || []);
-    } catch (err: any) {
-      toast.error(`Failed to load mail: ${err?.message ?? err}`);
-      setMessages([]);
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
+  const loadMessages = React.useCallback(
+    async (f: Folder) => {
+      setRefreshing(true);
+      try {
+        const res = await fetch(
+          `/api/myagentmail/messages?folder=${f}&group=thread&limit=50${scopeQS}`,
+        );
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+        setMessages(json.messages || []);
+      } catch (err: any) {
+        toast.error(`Failed to load mail: ${err?.message ?? err}`);
+        setMessages([]);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [scopeQS],
+  );
 
   React.useEffect(() => {
     loadCounts();
     loadMessages(folder);
-    // Selection doesn't carry between folders.
+    // Selection doesn't carry between folders or scope changes.
     setSelected(null);
     setThread(null);
-  }, [folder, loadMessages, loadCounts]);
+  }, [folder, scopeInboxId, loadMessages, loadCounts]);
 
   const openMessage = React.useCallback(async (m: MessageRow) => {
     setSelected(m);
@@ -362,7 +408,10 @@ export default function MailPage() {
       <FolderRail
         folder={folder}
         counts={counts}
+        inboxes={inboxes}
+        scopeInboxId={scopeInboxId}
         onSelect={(f) => setFolder(f)}
+        onScopeChange={(id) => setScopeInboxId(id)}
       />
       <div className="flex-1 flex min-w-0 rounded-lg border bg-background overflow-hidden">
         <MessageList
@@ -413,11 +462,17 @@ export default function MailPage() {
 function FolderRail({
   folder,
   counts,
+  inboxes,
+  scopeInboxId,
   onSelect,
+  onScopeChange,
 }: {
   folder: Folder;
   counts: FolderCounts | null;
+  inboxes: InboxOption[];
+  scopeInboxId: string | null;
   onSelect: (f: Folder) => void;
+  onScopeChange: (inboxId: string | null) => void;
 }) {
   const badge = (id: Folder): number | null => {
     if (!counts) return null;
@@ -428,7 +483,12 @@ function FolderRail({
     return null;
   };
   return (
-    <aside className="w-44 shrink-0 hidden md:flex md:flex-col">
+    <aside className="w-48 shrink-0 hidden md:flex md:flex-col gap-3">
+      <InboxScopePicker
+        inboxes={inboxes}
+        value={scopeInboxId}
+        onChange={onScopeChange}
+      />
       <ul className="space-y-0.5">
         {FOLDER_DEFS.map((f) => {
           const active = folder === f.id;
@@ -466,6 +526,64 @@ function FolderRail({
         })}
       </ul>
     </aside>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Inbox scope picker (top of folder rail)
+//
+// Lets the user scope every list/count call to a single provisioned
+// inbox, or stay in tenant-wide "All inboxes" mode (the default).
+// We use a native <select> for keyboard accessibility + zero deps. The
+// inbox count surfaces alongside the label so a tenant with several
+// inboxes knows the picker exists without clicking.
+// ─────────────────────────────────────────────────────────────────────
+
+function InboxScopePicker({
+  inboxes,
+  value,
+  onChange,
+}: {
+  inboxes: InboxOption[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+}) {
+  const label = (i: InboxOption) =>
+    i.displayName
+      ? `${i.displayName} <${i.username}@${i.domain}>`
+      : `${i.username}@${i.domain}`;
+
+  // Hide entirely until inbox list is loaded — avoids a flash of "no
+  // inboxes" copy on first paint. Keep a single-inbox case visible
+  // anyway so the user sees what mailbox the page represents.
+  if (inboxes.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="px-1.5">
+      <label className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70 mb-1 px-1">
+        Mailbox
+      </label>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+        className={cn(
+          "w-full text-sm bg-background border rounded-md px-2 py-1.5",
+          "focus:outline-none focus:ring-2 focus:ring-ring",
+          "truncate",
+        )}
+      >
+        <option value="">
+          All inboxes{inboxes.length > 1 ? ` (${inboxes.length})` : ""}
+        </option>
+        {inboxes.map((i) => (
+          <option key={i.id} value={i.id}>
+            {label(i)}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
