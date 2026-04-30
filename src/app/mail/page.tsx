@@ -199,6 +199,10 @@ async function sendReply(
 export default function MailPage() {
   const [folder, setFolder] = React.useState<Folder>("inbox");
   const [inboxes, setInboxes] = React.useState<InboxOption[]>([]);
+  // Distinguish "still loading" from "loaded but tenant has no inboxes
+  // yet" — we show a setup prompt in the second case rather than a
+  // misleading "your inbox is empty" message.
+  const [inboxesLoaded, setInboxesLoaded] = React.useState(false);
   // null = "All inboxes" (tenant-wide). Otherwise scope every API call
   // to the selected inbox via ?inboxId=…
   const [scopeInboxId, setScopeInboxId] = React.useState<string | null>(null);
@@ -228,6 +232,8 @@ export default function MailPage() {
         );
       } catch {
         /* the picker just stays minimal — All-inboxes still works */
+      } finally {
+        if (!cancelled) setInboxesLoaded(true);
       }
     })();
     return () => {
@@ -402,6 +408,14 @@ export default function MailPage() {
   );
 
   const isReaderOpen = selected !== null;
+
+  // First-run / no-inboxes-yet prompt. Shows whenever we've confirmed
+  // the tenant has zero provisioned inboxes — replacing the 3-pane
+  // shell with a dedicated setup screen is clearer than the generic
+  // "Inbox is empty" copy, which falsely implies mail will arrive.
+  if (inboxesLoaded && inboxes.length === 0) {
+    return <NoInboxesYet />;
+  }
 
   return (
     <div className="flex h-[calc(100vh-2rem)] gap-3 -my-3">
@@ -843,6 +857,50 @@ function ListSkeleton() {
         </li>
       ))}
     </ul>
+  );
+}
+
+// First-run state — tenant has no provisioned inboxes yet. We replace
+// the entire 3-pane shell with this so the user isn't told "your inbox
+// is empty" (which falsely implies mail will arrive without setup).
+function NoInboxesYet() {
+  return (
+    <div className="flex h-[calc(100vh-2rem)] -my-3 items-center justify-center">
+      <div className="max-w-md text-center px-6 py-10 rounded-lg border bg-background">
+        <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 grid place-items-center">
+          <Mail className="h-6 w-6 text-primary" />
+        </div>
+        <h2 className="mt-4 text-lg font-semibold tracking-tight">
+          Set up your first inbox
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The Mail view shows incoming and outgoing email across every
+          provisioned inbox in your tenant. You don&apos;t have any inboxes
+          yet — provision one to start sending and receiving.
+        </p>
+        <div className="mt-5 flex items-center justify-center gap-2">
+          <a
+            href="/inboxes"
+            className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-medium px-3.5 py-2 hover:bg-primary/90"
+          >
+            Provision an inbox
+          </a>
+          <a
+            href="/onboarding"
+            className="inline-flex items-center justify-center rounded-md border bg-background text-sm font-medium px-3.5 py-2 hover:bg-muted"
+          >
+            Run onboarding
+          </a>
+        </div>
+        <p className="mt-5 text-[11px] text-muted-foreground/80">
+          Inboxes are provisioned via{" "}
+          <code className="rounded bg-muted px-1 py-0.5">
+            POST /v1/inboxes
+          </code>
+          . The /inboxes page wraps that flow with a UI.
+        </p>
+      </div>
+    </div>
   );
 }
 
