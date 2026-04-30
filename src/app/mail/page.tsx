@@ -16,9 +16,13 @@
  *   GET /api/myagentmail/messages/folders/counts          → sidebar badges
  *   GET /api/myagentmail/inboxes/:id/threads/:tid         → thread detail
  *
- * Stage 2 is read-only (this file). Stage 3 adds star / mark-read /
- * archive / delete via PATCH /inboxes/:id/messages/:mid + DELETE, plus
- * a reply pane that POSTs to /inboxes/:id/reply/:mid.
+ * Interactions (Stage 3):
+ *   PATCH /inboxes/:id/messages/:mid {isRead|isStarred|isArchived}
+ *   DELETE /inboxes/:id/messages/:mid       (soft delete)
+ *   POST /inboxes/:id/reply/:mid {plainBody}
+ * All mutations are optimistic — local state flips first, request fires,
+ * we revert + toast on failure. Folder counts refetch after each
+ * mutation since unread/archive/trash totals can shift.
  *
  * Why a single file? The whole client is ~600 LOC even with three
  * panes; splitting earns nothing and forces prop drilling for the
@@ -37,6 +41,9 @@ import {
   ArrowLeft,
   Mail,
   Loader2,
+  MailOpen,
+  Reply,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -131,6 +138,57 @@ function localPart(addr: string): string {
 // Page
 // ─────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────
+// Mutation primitives — optimistic with revert-on-error
+// ─────────────────────────────────────────────────────────────────────
+
+type FlagPatch = Partial<Pick<MessageRow, "isRead" | "isStarred" | "isArchived">>;
+
+async function patchMessage(inboxId: string, messageId: string, patch: FlagPatch): Promise<void> {
+  const res = await fetch(
+    `/api/myagentmail/inboxes/${inboxId}/messages/${messageId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+}
+
+async function deleteMessage(inboxId: string, messageId: string): Promise<void> {
+  const res = await fetch(
+    `/api/myagentmail/inboxes/${inboxId}/messages/${messageId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+}
+
+async function sendReply(
+  inboxId: string,
+  messageId: string,
+  plainBody: string,
+): Promise<void> {
+  const res = await fetch(
+    `/api/myagentmail/inboxes/${inboxId}/reply/${messageId}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plainBody }),
+    },
+  );
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+}
+
 export default function MailPage() {
   const [folder, setFolder] = React.useState<Folder>("inbox");
   const [counts, setCounts] = React.useState<FolderCounts | null>(null);
@@ -178,6 +236,21 @@ export default function MailPage() {
   const openMessage = React.useCallback(async (m: MessageRow) => {
     setSelected(m);
     setThread(null);
+    // Auto-mark-read on open. Optimistic — we don't wait for the patch.
+    if (!m.isRead || (m.threadUnreadCount ?? 0) > 0) {
+      setMessages((cur) =>
+        (cur || []).map((x) =>
+          x.id === m.id
+            ? { ...x, isRead: true, threadUnreadCount: 0 }
+            : x,
+        ),
+      );
+      patchMessage(m.inboxId, m.id, { isRead: true })
+        .then(() => loadCounts())
+        .catch(() => {
+          // Revert silently — read-state drift is low-stakes.
+        });
+    }
     if (!m.threadId) return;
     setThreadLoading(true);
     try {
@@ -191,12 +264,96 @@ export default function MailPage() {
     } finally {
       setThreadLoading(false);
     }
-  }, []);
+  }, [loadCounts]);
 
   const closeReader = React.useCallback(() => {
     setSelected(null);
     setThread(null);
   }, []);
+
+  // ── Optimistic flag toggle (star, read, archive). Used by both list-row
+  // hover actions and the reading-pane toolbar.
+  const toggleFlag = React.useCallback(
+    async (m: MessageRow, key: keyof FlagPatch, next: boolean) => {
+      // Snapshot for rollback.
+      const prev = (messages || []).find((x) => x.id === m.id);
+      // Optimistic update.
+      setMessages((cur) =>
+        (cur || []).map((x) =>
+          x.id === m.id ? { ...x, [key]: next } : x,
+        ),
+      );
+      if (selected?.id === m.id) {
+        setSelected({ ...m, [key]: next } as MessageRow);
+      }
+      // If the change moves the row out of the active folder, drop it
+      // from the list immediately for a snappier feel. The next
+      // loadMessages() call will reconcile.
+      if (
+        (folder === "inbox" && key === "isArchived" && next) ||
+        (folder === "starred" && key === "isStarred" && !next) ||
+        (folder === "archived" && key === "isArchived" && !next)
+      ) {
+        setMessages((cur) => (cur || []).filter((x) => x.id !== m.id));
+        if (selected?.id === m.id) closeReader();
+      }
+      try {
+        await patchMessage(m.inboxId, m.id, { [key]: next });
+        loadCounts();
+      } catch (err: any) {
+        toast.error(`Failed to update: ${err?.message ?? err}`);
+        // Revert.
+        if (prev) {
+          setMessages((cur) =>
+            (cur || []).map((x) => (x.id === prev.id ? prev : x)),
+          );
+        }
+      }
+    },
+    [messages, selected, folder, loadCounts, closeReader],
+  );
+
+  const handleDelete = React.useCallback(
+    async (m: MessageRow) => {
+      if (!window.confirm("Delete this thread? It will move to Trash.")) return;
+      // Optimistic remove from current folder unless we're already in trash.
+      if (folder !== "trash") {
+        setMessages((cur) => (cur || []).filter((x) => x.id !== m.id));
+        if (selected?.id === m.id) closeReader();
+      }
+      try {
+        await deleteMessage(m.inboxId, m.id);
+        toast.success("Moved to Trash");
+        loadCounts();
+        if (folder === "trash") loadMessages(folder);
+      } catch (err: any) {
+        toast.error(`Failed to delete: ${err?.message ?? err}`);
+        loadMessages(folder); // resync since optimistic state diverged
+      }
+    },
+    [folder, selected, loadCounts, loadMessages, closeReader],
+  );
+
+  const handleReply = React.useCallback(
+    async (m: MessageRow, body: string) => {
+      await sendReply(m.inboxId, m.id, body);
+      toast.success("Reply sent");
+      // Refresh thread + folder counts — the reply just landed in Sent.
+      if (m.threadId) {
+        try {
+          const res = await fetch(
+            `/api/myagentmail/inboxes/${m.inboxId}/threads/${m.threadId}`,
+          );
+          const json = await res.json();
+          if (res.ok) setThread(json);
+        } catch {
+          /* non-fatal */
+        }
+      }
+      loadCounts();
+    },
+    [loadCounts],
+  );
 
   const isReaderOpen = selected !== null;
 
@@ -219,13 +376,29 @@ export default function MailPage() {
             loadCounts();
             loadMessages(folder);
           }}
+          onToggleStar={(m) => toggleFlag(m, "isStarred", !m.isStarred)}
+          onToggleRead={(m) => toggleFlag(m, "isRead", !m.isRead)}
+          onArchive={(m) => toggleFlag(m, "isArchived", !m.isArchived)}
+          onDelete={handleDelete}
         />
         {isReaderOpen && (
           <ReadingPane
             message={selected!}
             thread={thread}
             loading={threadLoading}
+            folder={folder}
             onBack={closeReader}
+            onToggleStar={() =>
+              toggleFlag(selected!, "isStarred", !selected!.isStarred)
+            }
+            onToggleRead={() =>
+              toggleFlag(selected!, "isRead", !selected!.isRead)
+            }
+            onArchive={() =>
+              toggleFlag(selected!, "isArchived", !selected!.isArchived)
+            }
+            onDelete={() => handleDelete(selected!)}
+            onReply={(body) => handleReply(selected!, body)}
           />
         )}
       </div>
@@ -308,6 +481,10 @@ function MessageList({
   collapsed,
   onSelect,
   onRefresh,
+  onToggleStar,
+  onToggleRead,
+  onArchive,
+  onDelete,
 }: {
   folder: Folder;
   messages: MessageRow[] | null;
@@ -316,6 +493,10 @@ function MessageList({
   collapsed: boolean;
   onSelect: (m: MessageRow) => void;
   onRefresh: () => void;
+  onToggleStar: (m: MessageRow) => void;
+  onToggleRead: (m: MessageRow) => void;
+  onArchive: (m: MessageRow) => void;
+  onDelete: (m: MessageRow) => void;
 }) {
   const folderLabel = FOLDER_DEFS.find((f) => f.id === folder)?.label ?? "Mail";
 
@@ -365,7 +546,12 @@ function MessageList({
                 key={m.id}
                 message={m}
                 selected={selectedId === m.id}
+                folder={folder}
                 onClick={() => onSelect(m)}
+                onToggleStar={() => onToggleStar(m)}
+                onToggleRead={() => onToggleRead(m)}
+                onArchive={() => onArchive(m)}
+                onDelete={() => onDelete(m)}
               />
             ))}
           </ul>
@@ -378,11 +564,21 @@ function MessageList({
 function MessageRowItem({
   message,
   selected,
+  folder,
   onClick,
+  onToggleStar,
+  onToggleRead,
+  onArchive,
+  onDelete,
 }: {
   message: MessageRow;
   selected: boolean;
+  folder: Folder;
   onClick: () => void;
+  onToggleStar: () => void;
+  onToggleRead: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
 }) {
   const unread =
     message.threadUnreadCount != null
@@ -393,27 +589,48 @@ function MessageRowItem({
       ? `To: ${localPart(message.to)}`
       : localPart(message.from);
 
+  // Stop propagation so the inline action buttons don't open the row.
+  const stop = (fn: () => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fn();
+  };
+
   return (
     <li>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
         className={cn(
-          "group w-full flex items-start gap-2.5 px-3 py-2.5 border-b text-left transition-colors",
+          "group w-full flex items-start gap-2.5 px-3 py-2.5 border-b text-left cursor-pointer transition-colors",
           selected ? "bg-primary/5" : "hover:bg-muted/50",
         )}
       >
         <div className="w-2 mt-1.5 shrink-0 flex justify-center">
           {unread && <span className="h-2 w-2 rounded-full bg-primary" />}
         </div>
-        <Star
-          className={cn(
-            "h-3.5 w-3.5 mt-0.5 shrink-0",
-            message.isStarred
-              ? "fill-amber-400 text-amber-400"
-              : "text-muted-foreground/40",
-          )}
-        />
+        <button
+          type="button"
+          onClick={stop(onToggleStar)}
+          className="shrink-0 mt-0.5 p-0.5 -m-0.5 rounded hover:bg-muted"
+          aria-label={message.isStarred ? "Unstar" : "Star"}
+        >
+          <Star
+            className={cn(
+              "h-3.5 w-3.5",
+              message.isStarred
+                ? "fill-amber-400 text-amber-400"
+                : "text-muted-foreground/40 hover:text-amber-400",
+            )}
+          />
+        </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span
@@ -447,7 +664,45 @@ function MessageRowItem({
             {message.inboxUsername}@{message.inboxDomain}
           </div>
         </div>
-      </button>
+        {/* Hover actions — appear on row hover, stop propagation so they
+            don't open the message. Hidden on small screens (touch users
+            interact via the reading pane toolbar). */}
+        <div className="hidden md:flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+          <button
+            type="button"
+            onClick={stop(onToggleRead)}
+            className="p-1 rounded hover:bg-muted"
+            aria-label={message.isRead ? "Mark unread" : "Mark read"}
+            title={message.isRead ? "Mark unread" : "Mark read"}
+          >
+            {message.isRead ? (
+              <Mail className="h-3.5 w-3.5" />
+            ) : (
+              <MailOpen className="h-3.5 w-3.5" />
+            )}
+          </button>
+          {folder !== "trash" && (
+            <button
+              type="button"
+              onClick={stop(onArchive)}
+              className="p-1 rounded hover:bg-muted"
+              aria-label={message.isArchived ? "Unarchive" : "Archive"}
+              title={message.isArchived ? "Unarchive" : "Archive"}
+            >
+              <Archive className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={stop(onDelete)}
+            className="p-1 rounded hover:bg-muted text-destructive/80 hover:text-destructive"
+            aria-label="Delete"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </li>
   );
 }
@@ -499,13 +754,26 @@ function ReadingPane({
   message,
   thread,
   loading,
+  folder,
   onBack,
+  onToggleStar,
+  onToggleRead,
+  onArchive,
+  onDelete,
+  onReply,
 }: {
   message: MessageRow;
   thread: ThreadDetail | null;
   loading: boolean;
+  folder: Folder;
   onBack: () => void;
+  onToggleStar: () => void;
+  onToggleRead: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+  onReply: (body: string) => Promise<void>;
 }) {
+  const [composing, setComposing] = React.useState(false);
   const messages = thread?.messages || null;
   const sorted = React.useMemo(() => {
     if (!messages) return null;
@@ -515,23 +783,111 @@ function ReadingPane({
     );
   }, [messages]);
 
+  // Replying targets the most recent INBOUND message in the thread —
+  // matches the agentic-inbox behavior. Falls back to the selected
+  // message if the whole thread is outbound (rare).
+  const replyTarget = React.useMemo(() => {
+    if (!sorted || sorted.length === 0) return message;
+    const lastInbound = [...sorted].reverse().find((m) => m.direction === "inbound");
+    return lastInbound ?? sorted[sorted.length - 1] ?? message;
+  }, [sorted, message]);
+
+  // Reset composer state when selection changes.
+  React.useEffect(() => {
+    setComposing(false);
+  }, [message.id]);
+
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0">
-        <Button variant="ghost" size="sm" onClick={onBack} className="md:hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-1 px-3 py-2 border-b shrink-0">
+        <Button variant="ghost" size="sm" onClick={onBack} title="Close">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h2 className="text-base font-semibold truncate flex-1">
-          {message.subject || "(no subject)"}
-        </h2>
+        <div className="w-px h-5 bg-border mx-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleStar}
+          title={message.isStarred ? "Unstar" : "Star"}
+        >
+          <Star
+            className={cn(
+              "h-4 w-4",
+              message.isStarred && "fill-amber-400 text-amber-400",
+            )}
+          />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleRead}
+          title={message.isRead ? "Mark unread" : "Mark read"}
+        >
+          {message.isRead ? (
+            <Mail className="h-4 w-4" />
+          ) : (
+            <MailOpen className="h-4 w-4" />
+          )}
+        </Button>
+        {folder !== "trash" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onArchive}
+            title={message.isArchived ? "Unarchive" : "Archive"}
+          >
+            <Archive className="h-4 w-4" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDelete}
+          title="Delete"
+          className="text-destructive/80 hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+        <div className="w-px h-5 bg-border mx-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setComposing((c) => !c)}
+          title="Reply"
+          disabled={folder === "sent"}
+        >
+          <Reply className="h-4 w-4 mr-1" />
+          Reply
+        </Button>
         {(message.threadCount ?? 1) > 1 && (
-          <Badge variant="outline" className="shrink-0">
+          <Badge variant="outline" className="ml-auto">
             {message.threadCount} messages
           </Badge>
         )}
       </div>
 
+      {/* Subject header */}
+      <div className="px-5 py-3 border-b shrink-0">
+        <h2 className="text-lg font-semibold leading-snug">
+          {message.subject || "(no subject)"}
+        </h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          {message.inboxUsername}@{message.inboxDomain}
+        </p>
+      </div>
+
       <div className="flex-1 overflow-y-auto">
+        {composing && (
+          <ReplyComposer
+            target={replyTarget}
+            onCancel={() => setComposing(false)}
+            onSend={async (body) => {
+              await onReply(body);
+              setComposing(false);
+            }}
+          />
+        )}
         {loading && !sorted ? (
           <ReaderSkeleton />
         ) : sorted && sorted.length > 0 ? (
@@ -548,6 +904,92 @@ function ReadingPane({
           // Single-message fallback if thread fetch failed or thread has 1 msg
           <SingleMessageFallback message={message} />
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Reply composer (inline at top of thread)
+// ─────────────────────────────────────────────────────────────────────
+
+function ReplyComposer({
+  target,
+  onCancel,
+  onSend,
+}: {
+  target: MessageRow | ThreadDetail["messages"][number];
+  onCancel: () => void;
+  onSend: (body: string) => Promise<void>;
+}) {
+  const [body, setBody] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const recipient =
+    "from" in target && typeof target.from === "string" ? target.from : "";
+  const subject =
+    "subject" in target && typeof target.subject === "string"
+      ? target.subject.startsWith("Re:")
+        ? target.subject
+        : `Re: ${target.subject}`
+      : "";
+
+  const send = async () => {
+    if (!body.trim()) {
+      toast.error("Reply body can't be empty");
+      return;
+    }
+    setSending(true);
+    try {
+      await onSend(body);
+    } catch (err: any) {
+      toast.error(`Failed to send: ${err?.message ?? err}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="m-4 mb-2 rounded-lg border bg-muted/30 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-muted-foreground">
+          To: <span className="font-medium text-foreground/80">{recipient}</span>
+          <span className="mx-2">•</span>
+          {subject}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onCancel}
+          aria-label="Cancel"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Write your reply…"
+        rows={6}
+        autoFocus
+        className="w-full bg-background border rounded-md px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={sending}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={send} disabled={sending || !body.trim()}>
+          {sending ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Sending…
+            </>
+          ) : (
+            <>
+              <Send className="h-3.5 w-3.5 mr-1.5" />
+              Send reply
+            </>
+          )}
+        </Button>
       </div>
     </div>
   );
